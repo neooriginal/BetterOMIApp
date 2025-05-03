@@ -6,6 +6,7 @@ const llmService = require('../services/llmService');
 const brainService = require('../services/brainService');
 const actionItemsService = require('../services/actionItemsService');
 const memoriesService = require('../services/memoriesService');
+const deepgramService = require('../services/deepgramService');
 
 // Store streaming text buffers by session ID
 const streamBuffers = new Map();
@@ -14,6 +15,60 @@ const streamTimeouts = new Map();
 
 // Define inactivity timeout (5 minutes in milliseconds)
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
+
+/**
+ * Endpoint to receive audio data from Omi device
+ */
+router.post('/audio', async (req, res) => {
+  try {
+    const { audioData, sessionId } = req.body;
+    
+    if (!audioData) {
+      return res.status(400).json({
+        success: false,
+        message: 'Audio data is required'
+      });
+    }
+    
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required'
+      });
+    }
+
+    console.log(`Received audio data for session ${sessionId} (length: ${audioData.length} chars)`);
+
+    try {
+      // Pass audio data to Deepgram service for transcription
+      // The service will handle sending the text back to our stream endpoint
+      await deepgramService.processAudio(audioData, sessionId);
+      
+      // Return success response
+      res.json({
+        success: true,
+        message: 'Audio data received and processing'
+      });
+    } catch (error) {
+      console.error('Deepgram service error:', error);
+      
+      res.status(500).json({
+        success: false,
+        message: 'Error processing audio with Deepgram',
+        error: error.message
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error processing audio data:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error processing audio data',
+      error: error.message
+    });
+  }
+});
 
 /**
  * Endpoint to stream text fragments that will be processed after inactivity

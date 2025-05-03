@@ -1,2 +1,6 @@
 backend/node_modules
 backend/data
+backend/.env
+backend/package-lock.json
+python/.env
+.env
