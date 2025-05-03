@@ -1,0 +1,275 @@
+const { run, get, all } = require('../models/database');
+
+/**
+ * Create a new action item
+ * @param {Object} actionItem - Action item details
+ * @returns {Promise<Object>} - The created action item
+ */
+async function createActionItem(actionItem) {
+  try {
+    const { title, description, due_date, priority = 1 } = actionItem;
+    
+    const result = await run(
+      'INSERT INTO action_items (title, description, due_date, priority) VALUES (?, ?, ?, ?)',
+      [title, description, due_date, priority]
+    );
+    
+    return {
+      id: result.id,
+      title,
+      description,
+      due_date,
+      priority,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error('Error creating action item:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all action items
+ * @param {Object} options - Filter options
+ * @returns {Promise<Array>} - List of action items
+ */
+async function getActionItems(options = {}) {
+  try {
+    const { status, priority, sortBy = 'priority', sortOrder = 'DESC' } = options;
+    
+    let query = 'SELECT * FROM action_items';
+    const params = [];
+    
+    // Add filters
+    const conditions = [];
+    if (status) {
+      conditions.push('status = ?');
+      params.push(status);
+    }
+    
+    if (priority) {
+      conditions.push('priority = ?');
+      params.push(priority);
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    // Add sorting
+    query += ` ORDER BY ${sortBy} ${sortOrder}`;
+    
+    return await all(query, params);
+  } catch (error) {
+    console.error('Error retrieving action items:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update an action item
+ * @param {number} id - ID of the action item to update
+ * @param {Object} updates - Fields to update
+ * @returns {Promise<Object>} - The updated action item
+ */
+async function updateActionItem(id, updates) {
+  try {
+    const { title, description, due_date, priority, status } = updates;
+    
+    // Build update query dynamically based on provided fields
+    const setFields = [];
+    const params = [];
+    
+    if (title !== undefined) {
+      setFields.push('title = ?');
+      params.push(title);
+    }
+    
+    if (description !== undefined) {
+      setFields.push('description = ?');
+      params.push(description);
+    }
+    
+    if (due_date !== undefined) {
+      setFields.push('due_date = ?');
+      params.push(due_date);
+    }
+    
+    if (priority !== undefined) {
+      setFields.push('priority = ?');
+      params.push(priority);
+    }
+    
+    if (status !== undefined) {
+      setFields.push('status = ?');
+      params.push(status);
+    }
+    
+    if (setFields.length === 0) {
+      return await get('SELECT * FROM action_items WHERE id = ?', [id]);
+    }
+    
+    // Add id to params
+    params.push(id);
+    
+    // Execute update
+    await run(
+      `UPDATE action_items SET ${setFields.join(', ')} WHERE id = ?`,
+      params
+    );
+    
+    // Return updated item
+    return await get('SELECT * FROM action_items WHERE id = ?', [id]);
+  } catch (error) {
+    console.error('Error updating action item:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete an action item
+ * @param {number} id - ID of the action item to delete
+ * @returns {Promise<boolean>} - Success status
+ */
+async function deleteActionItem(id) {
+  try {
+    await run('DELETE FROM action_items WHERE id = ?', [id]);
+    return true;
+  } catch (error) {
+    console.error('Error deleting action item:', error);
+    throw error;
+  }
+}
+
+/**
+ * Mark an action item as complete
+ * @param {number} id - ID of the action item
+ * @returns {Promise<Object>} - The updated action item
+ */
+async function completeActionItem(id) {
+  try {
+    await run(
+      'UPDATE action_items SET status = ? WHERE id = ?',
+      ['completed', id]
+    );
+    
+    return await get('SELECT * FROM action_items WHERE id = ?', [id]);
+  } catch (error) {
+    console.error('Error completing action item:', error);
+    throw error;
+  }
+}
+
+/**
+ * Process action items from LLM extraction
+ * @param {Array} actionItems - Action items extracted by LLM
+ * @returns {Promise<Array>} - Created action items
+ */
+async function processActionItems(actionItems) {
+  const results = [];
+  
+  try {
+    if (Array.isArray(actionItems)) {
+      console.log(`Processing ${actionItems.length} extracted action items`);
+      
+      for (const item of actionItems) {
+        // Skip empty items
+        if (!item.title || item.title.trim() === '') {
+          continue;
+        }
+        
+        // Format due date if provided
+        let dueDate = null;
+        if (item.dueDate || item.due_date) {
+          const dateStr = item.dueDate || item.due_date;
+          
+          try {
+            // First try direct parsing (for ISO dates, etc.)
+            const parsedDate = new Date(dateStr);
+            if (!isNaN(parsedDate.getTime())) {
+              dueDate = parsedDate.toISOString();
+            } else {
+              // Handle natural language date references
+              const today = new Date();
+              const lowerDateStr = dateStr.toLowerCase();
+              
+              if (lowerDateStr.includes('asap') || lowerDateStr.includes('as soon as possible')) {
+                // Set to today
+                dueDate = today.toISOString();
+              } else if (lowerDateStr.includes('tomorrow')) {
+                const tomorrow = new Date(today);
+                tomorrow.setDate(today.getDate() + 1);
+                dueDate = tomorrow.toISOString();
+              } else if (lowerDateStr.includes('next week')) {
+                const nextWeek = new Date(today);
+                nextWeek.setDate(today.getDate() + 7);
+                dueDate = nextWeek.toISOString();
+              } else if (lowerDateStr.includes('next month')) {
+                const nextMonth = new Date(today);
+                nextMonth.setMonth(today.getMonth() + 1);
+                dueDate = nextMonth.toISOString();
+              } else if (lowerDateStr.includes('days') || lowerDateStr.includes('day')) {
+                // Extract number of days if present
+                const match = lowerDateStr.match(/(\d+)\s+days?/);
+                if (match && match[1]) {
+                  const days = parseInt(match[1]);
+                  const future = new Date(today);
+                  future.setDate(today.getDate() + days);
+                  dueDate = future.toISOString();
+                } else {
+                  // Default to 3 days if no specific number
+                  const threeDays = new Date(today);
+                  threeDays.setDate(today.getDate() + 3);
+                  dueDate = threeDays.toISOString();
+                }
+              } else if (lowerDateStr.includes('hour') || lowerDateStr.includes('hrs')) {
+                // For "hours" references, set to tomorrow
+                const tomorrow = new Date(today);
+                tomorrow.setDate(today.getDate() + 1);
+                dueDate = tomorrow.toISOString();
+              } else {
+                // For other natural language dates, default to 3 days from now
+                console.log(`Converting natural language date "${dateStr}" to 3 days from now`);
+                const threeDays = new Date(today);
+                threeDays.setDate(today.getDate() + 3);
+                dueDate = threeDays.toISOString();
+              }
+            }
+          } catch (e) {
+            console.warn('Invalid due date format:', dateStr);
+            // Default to 3 days from now
+            const threeDays = new Date();
+            threeDays.setDate(threeDays.getDate() + 3);
+            dueDate = threeDays.toISOString();
+          }
+        }
+        
+        const actionItem = await createActionItem({
+          title: item.title,
+          description: item.description || '',
+          due_date: dueDate,
+          priority: item.priority || 3 // Default to medium priority if not specified
+        });
+        
+        results.push(actionItem);
+      }
+    } else {
+      console.log('No action items to process - empty or invalid array');
+    }
+    
+    return results;
+  } catch (error) {
+    console.error('Error processing action items:', error);
+    throw error;
+  }
+}
+
+module.exports = {
+  createActionItem,
+  getActionItems,
+  updateActionItem,
+  deleteActionItem,
+  completeActionItem,
+  processActionItems
+}; 

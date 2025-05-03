@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Text Stream Demo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    #wordDisplay {
+      min-height: 100px;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 20px;
+      font-family: monospace;
+    }
+    
+    #statusBar {
+      height: 30px;
+      background-color: #f0f0f0;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    
+    .timer {
+      margin-left: auto;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <h1 class="mb-4">Text Stream Demo</h1>
+    
+    <div class="row mb-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">Input Stream</h5>
+              <div>
+                <span id="sessionDisplay" class="badge bg-secondary">Session ID: </span>
+                <span id="bufferSize" class="badge bg-info">Buffer: 0 chars</span>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="statusBar">
+              <span id="status">Ready to stream</span>
+              <span class="timer" id="timer">05:00</span>
+            </div>
+            
+            <div id="wordDisplay" class="mb-3"></div>
+            
+            <div class="mb-3">
+              <label for="textInput" class="form-label">Type or paste text</label>
+              <textarea id="textInput" class="form-control" rows="3" placeholder="Type here to simulate continuous text input..."></textarea>
+            </div>
+            
+            <div class="d-flex gap-2">
+              <button id="startStreamBtn" class="btn btn-primary">Start Stream</button>
+              <button id="pauseBtn" class="btn btn-warning" disabled>Pause</button>
+              <button id="processNowBtn" class="btn btn-success" disabled>Process Now</button>
+              <button id="clearBtn" class="btn btn-danger" disabled>Clear Buffer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="row">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h5 class="mb-0">API Response</h5>
+          </div>
+          <div class="card-body">
+            <pre id="apiResponse" style="max-height: 300px; overflow-y: auto;">No response yet</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Elements
+      const wordDisplay = document.getElementById('wordDisplay');
+      const statusBar = document.getElementById('statusBar');
+      const status = document.getElementById('status');
+      const timer = document.getElementById('timer');
+      const textInput = document.getElementById('textInput');
+      const startStreamBtn = document.getElementById('startStreamBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      const processNowBtn = document.getElementById('processNowBtn');
+      const clearBtn = document.getElementById('clearBtn');
+      const apiResponse = document.getElementById('apiResponse');
+      const sessionDisplay = document.getElementById('sessionDisplay');
+      const bufferSize = document.getElementById('bufferSize');
+      
+      // Variables
+      let sessionId = generateSessionId();
+      let streaming = false;
+      let streamInterval;
+      let words = [];
+      let currentWordIndex = 0;
+      let countdownInterval;
+      let remainingTime = 5 * 60; // 5 minutes in seconds
+      
+      // Display session ID
+      sessionDisplay.textContent = `Session ID: ${sessionId}`;
+      
+      // Generate a random session ID
+      function generateSessionId() {
+        return 'session_' + Math.random().toString(36).substring(2, 15);
+      }
+      
+      // Update timer display
+      function updateTimer(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        timer.textContent = `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+      
+      // Start countdown timer
+      function startCountdown() {
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+        }
+        
+        remainingTime = 5 * 60;
+        updateTimer(remainingTime);
+        
+        countdownInterval = setInterval(() => {
+          remainingTime--;
+          updateTimer(remainingTime);
+          
+          if (remainingTime <= 0) {
+            clearInterval(countdownInterval);
+            status.textContent = 'Timeout reached - processing...';
+            fetchStatus();
+          }
+        }, 1000);
+      }
+      
+      // Reset countdown timer
+      function resetCountdown() {
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+        }
+        remainingTime = 5 * 60;
+        updateTimer(remainingTime);
+      }
+      
+      // Stream text to the API
+      async function streamWord(word) {
+        try {
+          const response = await fetch('/stream', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              sessionId,
+              text: word
+            })
+          });
+          
+          const data = await response.json();
+          bufferSize.textContent = `Buffer: ${data.bufferedCharacters} chars`;
+          
+          return data;
+        } catch (error) {
+          console.error('Error streaming word:', error);
+          status.textContent = 'Error streaming word';
+          return null;
+        }
+      }
+      
+      // Fetch stream status
+      async function fetchStatus() {
+        try {
+          const response = await fetch(`/stream/status/${sessionId}`);
+          const data = await response.json();
+          
+          apiResponse.textContent = JSON.stringify(data, null, 2);
+          bufferSize.textContent = `Buffer: ${data.bufferLength} chars`;
+          
+          if (data.remainingTimeMs > 0) {
+            remainingTime = Math.floor(data.remainingTimeMs / 1000);
+            updateTimer(remainingTime);
+          }
+          
+          return data;
+        } catch (error) {
+          console.error('Error fetching status:', error);
+          return null;
+        }
+      }
+      
+      // Force process the stream
+      async function processStream() {
+        try {
+          status.textContent = 'Processing stream...';
+          
+          const response = await fetch(`/stream/process-now/${sessionId}`, {
+            method: 'POST'
+          });
+          
+          const data = await response.json();
+          apiResponse.textContent = JSON.stringify(data, null, 2);
+          
+          status.textContent = 'Stream processed';
+          pauseStream();
+          resetCountdown();
+          
+          return data;
+        } catch (error) {
+          console.error('Error processing stream:', error);
+          status.textContent = 'Error processing stream';
+          return null;
+        }
+      }
+      
+      // Clear the stream
+      async function clearStream() {
+        try {
+          const response = await fetch(`/stream/${sessionId}`, {
+            method: 'DELETE'
+          });
+          
+          const data = await response.json();
+          apiResponse.textContent = JSON.stringify(data, null, 2);
+          
+          wordDisplay.innerHTML = '';
+          currentWordIndex = 0;
+          words = [];
+          bufferSize.textContent = 'Buffer: 0 chars';
+          
+          return data;
+        } catch (error) {
+          console.error('Error clearing stream:', error);
+          return null;
+        }
+      }
+      
+      // Start streaming
+      function startStream() {
+        if (streaming) return;
+        
+        // Parse input text into words
+        const text = textInput.value.trim();
+        if (!text) {
+          status.textContent = 'Please enter some text';
+          return;
+        }
+        
+        words = text.split(/\s+/);
+        currentWordIndex = 0;
+        wordDisplay.innerHTML = '';
+        
+        streaming = true;
+        status.textContent = 'Streaming...';
+        
+        startStreamBtn.disabled = true;
+        pauseBtn.disabled = false;
+        processNowBtn.disabled = false;
+        clearBtn.disabled = false;
+        
+        streamInterval = setInterval(async () => {
+          if (currentWordIndex < words.length) {
+            const word = words[currentWordIndex];
+            const span = document.createElement('span');
+            span.textContent = word + ' ';
+            wordDisplay.appendChild(span);
+            
+            // Stream word to API
+            await streamWord(word);
+            
+            currentWordIndex++;
+            wordDisplay.scrollTop = wordDisplay.scrollHeight;
+            
+            // Reset countdown on each word
+            resetCountdown();
+            startCountdown();
+          } else {
+            status.textContent = 'Stream complete - waiting for timeout';
+            pauseStream();
+          }
+        }, 200); // Send a word every 200ms
+      }
+      
+      // Pause streaming
+      function pauseStream() {
+        streaming = false;
+        if (streamInterval) {
+          clearInterval(streamInterval);
+        }
+        
+        startStreamBtn.disabled = false;
+        pauseBtn.disabled = true;
+      }
+      
+      // Event listeners
+      startStreamBtn.addEventListener('click', startStream);
+      
+      pauseBtn.addEventListener('click', () => {
+        pauseStream();
+        status.textContent = 'Stream paused';
+      });
+      
+      processNowBtn.addEventListener('click', processStream);
+      
+      clearBtn.addEventListener('click', async () => {
+        await clearStream();
+        resetCountdown();
+        status.textContent = 'Stream cleared';
+        pauseStream();
+        processNowBtn.disabled = true;
+        clearBtn.disabled = true;
+      });
+      
+      // Initialize
+      updateTimer(remainingTime);
+    });
+  </script>
+</body>
+</html> 

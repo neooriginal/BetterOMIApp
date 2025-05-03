@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> - GenOmi</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand" href="/">GenOmi</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link active" href="/input">Input</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/action-items">Action Items</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/memories">Memories</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container py-5">
+    <h1 class="mb-4">Input Text for Analysis</h1>
+    <div class="row">
+      <div class="col-lg-8">
+        <div class="card shadow-sm mb-4">
+          <div class="card-body">
+            <form id="textInputForm">
+              <div class="mb-3">
+                <label for="textInput" class="form-label">Enter Text</label>
+                <textarea 
+                  class="form-control" 
+                  id="textInput" 
+                  rows="16" 
+                  placeholder="Enter detailed conversations, notes, meeting minutes, or any text you'd like to analyze and remember. The more detailed your input, the more comprehensive your memories will be..."
+                  required
+                ></textarea>
+              </div>
+              <div class="d-grid gap-2">
+                <button type="submit" class="btn btn-primary" id="analyzeBtn">
+                  <span class="spinner-border spinner-border-sm d-none" id="loadingSpinner" role="status" aria-hidden="true"></span>
+                  Analyze Text
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="alert alert-info" role="alert">
+          <h4 class="alert-heading">How This Works</h4>
+          <p>The text you enter will be analyzed by an AI to extract and organize important information:</p>
+          <ul>
+            <li><strong>Brain Nodes:</strong> People, locations, events, and other entities mentioned</li>
+            <li><strong>Action Items:</strong> Tasks or to-dos extracted from your text</li>
+            <li><strong>Memories:</strong> Important conversations or information worth remembering</li>
+          </ul>
+          <p class="mb-0">The system will automatically assign importance levels and expiration dates based on the context.</p>
+        </div>
+      </div>
+      
+      <div class="col-lg-4">
+        <div class="card shadow-sm mb-4">
+          <div class="card-header bg-primary text-white">
+            <h5 class="card-title mb-0">Analysis Results</h5>
+          </div>
+          <div class="card-body" id="resultsContainer">
+            <div class="text-center p-4">
+              <p class="text-muted">Enter text and click "Analyze Text" to see results.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card shadow-sm">
+          <div class="card-header bg-secondary text-white">
+            <h5 class="card-title mb-0">Examples</h5>
+          </div>
+          <div class="card-body">
+            <p><strong>Try these example texts:</strong></p>
+            <div class="example-buttons">
+              <button class="btn btn-outline-secondary btn-sm mb-2" onclick="loadExample('meeting')">Meeting Notes</button>
+              <button class="btn btn-outline-secondary btn-sm mb-2" onclick="loadExample('conversation')">Conversation</button>
+              <button class="btn btn-outline-secondary btn-sm mb-2" onclick="loadExample('todo')">Todo List</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="py-4 bg-dark">
+    <div class="container">
+      <p class="m-0 text-center text-white">
+        &copy; 2023 GenOmi Brain Memory System
+      </p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Form submission handler
+    document.getElementById('textInputForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const textInput = document.getElementById('textInput').value.trim();
+      if (!textInput) return;
+      
+      // Show loading state
+      const analyzeBtn = document.getElementById('analyzeBtn');
+      const loadingSpinner = document.getElementById('loadingSpinner');
+      analyzeBtn.disabled = true;
+      loadingSpinner.classList.remove('d-none');
+      
+      try {
+        const response = await fetch('/input/process', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ text: textInput })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          displayResults(result.results);
+        } else {
+          showError(result.message || 'An error occurred');
+        }
+      } catch (error) {
+        console.error('Error analyzing text:', error);
+        showError('Failed to analyze text. Please try again.');
+      } finally {
+        // Reset loading state
+        analyzeBtn.disabled = false;
+        loadingSpinner.classList.add('d-none');
+      }
+    });
+    
+    function displayResults(results) {
+      const container = document.getElementById('resultsContainer');
+      
+      // Count extracted items
+      const actionItemCount = results.actionItems ? results.actionItems.length : 0;
+      const memoryCount = results.memories ? results.memories.length : 0;
+      
+      // Count brain entities
+      const peopleCount = results.brain && results.brain.people ? results.brain.people.length : 0;
+      const locationsCount = results.brain && results.brain.locations ? results.brain.locations.length : 0;
+      const eventsCount = results.brain && results.brain.events ? results.brain.events.length : 0;
+      const relationshipsCount = results.brain && results.brain.relationships ? results.brain.relationships.length : 0;
+      const brainEntityCount = peopleCount + locationsCount + eventsCount;
+      
+      container.innerHTML = `
+        <div class="results-summary">
+          <h6 class="text-success mb-3">Analysis Complete!</h6>
+          
+          <div class="card mb-3">
+            <div class="card-header bg-light">
+              <h6 class="mb-0">Brain Entities</h6>
+            </div>
+            <div class="card-body p-2">
+              <div class="d-flex justify-content-between mb-2">
+                <span>People:</span>
+                <span class="badge bg-primary rounded-pill">${peopleCount}</span>
+              </div>
+              <div class="d-flex justify-content-between mb-2">
+                <span>Locations:</span>
+                <span class="badge bg-primary rounded-pill">${locationsCount}</span>
+              </div>
+              <div class="d-flex justify-content-between mb-2">
+                <span>Events:</span>
+                <span class="badge bg-primary rounded-pill">${eventsCount}</span>
+              </div>
+              <div class="d-flex justify-content-between mb-0">
+                <span>Relationships:</span>
+                <span class="badge bg-secondary rounded-pill">${relationshipsCount}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="d-flex justify-content-between mb-2">
+            <span>Action Items:</span>
+            <span class="badge bg-warning rounded-pill">${actionItemCount}</span>
+          </div>
+          <div class="d-flex justify-content-between mb-3">
+            <span>Memories:</span>
+            <span class="badge bg-info rounded-pill">${memoryCount}</span>
+          </div>
+          
+          <div class="mt-4">
+            ${actionItemCount > 0 ? `<a href="/action-items" class="btn btn-sm btn-outline-warning d-block mb-2">View Action Items</a>` : ''}
+            ${memoryCount > 0 ? `<a href="/memories" class="btn btn-sm btn-outline-info d-block mb-2">View Memories</a>` : ''}
+            ${brainEntityCount > 0 ? `<button class="btn btn-sm btn-outline-primary d-block" onclick="showBrainEntities()">View Brain Entities</button>` : ''}
+          </div>
+        </div>
+      `;
+      
+      // Store brain entities in a global variable for viewing
+      window.brainEntities = results.brain;
+    }
+    
+    // Function to show brain entities in a modal
+    function showBrainEntities() {
+      const entityDisplay = document.createElement('div');
+      
+      if (window.brainEntities) {
+        const { people, locations, events, relationships } = window.brainEntities;
+        
+        let html = '<div class="modal-body">';
+        
+        // Helper function to format expiration date
+        function formatExpiration(entity) {
+          if (!entity.expires_at) {
+            return '<span class="badge bg-success">Permanent</span>';
+          }
+          
+          const expiryDate = new Date(entity.expires_at);
+          const today = new Date();
+          const diffTime = expiryDate.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          let badgeClass = 'bg-warning';
+          if (diffDays < 0) {
+            badgeClass = 'bg-danger';
+          } else if (diffDays > 90) {
+            badgeClass = 'bg-info';
+          }
+          
+          return `<span class="badge ${badgeClass}">Expires: ${expiryDate.toLocaleDateString()}</span>`;
+        }
+        
+        // People section
+        if (people && people.length > 0) {
+          html += '<h6 class="fw-bold">People</h6><ul class="list-group mb-3">';
+          people.forEach(person => {
+            html += `<li class="list-group-item">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span><strong>${person.name}</strong></span>
+                <span class="badge bg-primary rounded-pill">Importance: ${person.importance || 1}</span>
+              </div>
+              <div class="d-flex justify-content-between align-items-center">
+                ${person.role ? `<small class="text-muted">${person.role}</small>` : '<small class="text-muted">No role</small>'}
+                ${formatExpiration(person)}
+              </div>
+            </li>`;
+          });
+          html += '</ul>';
+        }
+        
+        // Locations section
+        if (locations && locations.length > 0) {
+          html += '<h6 class="fw-bold">Locations</h6><ul class="list-group mb-3">';
+          locations.forEach(location => {
+            html += `<li class="list-group-item">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span><strong>${location.name}</strong></span>
+                <span class="badge bg-primary rounded-pill">Importance: ${location.importance || 1}</span>
+              </div>
+              <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Location</small>
+                ${formatExpiration(location)}
+              </div>
+            </li>`;
+          });
+          html += '</ul>';
+        }
+        
+        // Events section
+        if (events && events.length > 0) {
+          html += '<h6 class="fw-bold">Events</h6><ul class="list-group mb-3">';
+          events.forEach(event => {
+            const data = event.data ? (typeof event.data === 'string' ? JSON.parse(event.data) : event.data) : {};
+            
+            html += `<li class="list-group-item">
+              <div class="d-flex justify-content-between mb-1">
+                <strong>${event.name}</strong>
+                <span class="badge bg-primary rounded-pill">Importance: ${event.importance || 1}</span>
+              </div>
+              ${data.description ? `<p class="mb-1 small">${data.description}</p>` : ''}
+              <div class="d-flex justify-content-between align-items-center">
+                ${data.date ? `<small class="text-muted">Date: ${data.date}</small>` : '<small class="text-muted">No date</small>'}
+                ${formatExpiration(event)}
+              </div>
+            </li>`;
+          });
+          html += '</ul>';
+        }
+        
+        // Relationships section
+        if (relationships && relationships.length > 0) {
+          html += '<h6 class="fw-bold">Relationships</h6><ul class="list-group">';
+          
+          // Map to store entity names by ID for displaying relationships
+          const entityMap = {};
+          
+          // Populate map with entity names
+          people.forEach(person => { entityMap[person.id] = person.name; });
+          locations.forEach(location => { entityMap[location.id] = location.name; });
+          events.forEach(event => { entityMap[event.id] = event.name; });
+          
+          relationships.forEach(rel => {
+            const fromName = entityMap[rel.from_node_id] || `Entity #${rel.from_node_id}`;
+            const toName = entityMap[rel.to_node_id] || `Entity #${rel.to_node_id}`;
+            
+            html += `<li class="list-group-item">
+              <div class="d-flex align-items-center">
+                <strong>${fromName}</strong>
+                <span class="mx-2 badge bg-secondary">${rel.relationship_type}</span>
+                <strong>${toName}</strong>
+              </div>
+            </li>`;
+          });
+          html += '</ul>';
+        }
+        
+        html += '</div>';
+        entityDisplay.innerHTML = html;
+        
+        // Create and show a modal
+        const modalHtml = `
+          <div class="modal fade" id="brainEntitiesModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title">Brain Entities</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                ${html}
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        // Add the modal to the page
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Show the modal
+        const modal = new bootstrap.Modal(document.getElementById('brainEntitiesModal'));
+        modal.show();
+        
+        // Remove the modal when it's hidden
+        document.getElementById('brainEntitiesModal').addEventListener('hidden.bs.modal', function () {
+          this.remove();
+        });
+      }
+    }
+    
+    function showError(message) {
+      const container = document.getElementById('resultsContainer');
+      container.innerHTML = `
+        <div class="alert alert-danger">
+          ${message}
+        </div>
+      `;
+    }
+    
+    // Example text loader
+    function loadExample(type) {
+      const textArea = document.getElementById('textInput');
+      
+      let exampleText = '';
+      
+      switch (type) {
+        case 'meeting':
+          exampleText = `Meeting Notes: Project Launch - June 10, 2023
+          
+Attendees: John Smith (Project Manager), Sarah Johnson (Developer), Mike Wong (Designer), Emma Davis (Marketing)
+
+Action Items:
+- Sarah needs to set up the GitHub repository by Wednesday
+- Mike should finalize the logo designs by Friday
+- Emma will draft the press release by next Monday
+- John will schedule the follow-up meeting for next Thursday at 2pm
+
+Key Decisions:
+- We decided to launch the beta version on July 15th
+- The project will be named "GenOmi" 
+- We'll use AWS for hosting
+- Initial target market will be small business owners
+
+Next meeting will be at the downtown office on Thursday, June 17th.`;
+          break;
+          
+        case 'conversation':
+          exampleText = `Conversation with Dr. Lisa Chen about my health consultation.
+
+She recommended I take Vitamin D supplements, 2000 IU daily, starting tomorrow.
+I should get a blood test within 3 months to check my cholesterol levels.
+
+She mentioned the new medical center opening next month at 123 Main Street would be more convenient for me.
+
+Important: My follow-up appointment is scheduled for September 5th at 10:30am. I should fast for 12 hours before the appointment.
+
+Dr. Chen also suggested I contact nutritionist James Wilson for a diet plan. His number is 555-123-4567.`;
+          break;
+          
+        case 'todo':
+          exampleText = `Things I need to do this week:
+
+1. Call mom on her birthday (Thursday)
+2. Pay the electricity bill by Friday
+3. Buy groceries: milk, eggs, bread, vegetables
+4. Finish the quarterly report - high priority!
+5. Schedule dentist appointment
+6. Pick up dry cleaning on Wednesday
+7. Email professor about research paper extension
+8. Water the plants
+9. Return library books by Saturday
+10. Research vacation options for August trip to Europe`;
+          break;
+      }
+      
+      textArea.value = exampleText;
+    }
+  </script>
+</body>
+</html> 

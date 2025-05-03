@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> - GenOmi</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand" href="/">GenOmi</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/input">Input</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/action-items">Action Items</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link active" href="/memories">Memories</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="mb-0">Memories</h1>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newMemoryModal">
+        <i class="bi bi-plus-circle me-1"></i> New Memory
+      </button>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-8">
+            <div class="input-group mb-3 mb-md-0">
+              <input type="text" class="form-control" id="searchInput" placeholder="Search memories..." value="<%= typeof searchQuery !== 'undefined' ? searchQuery : '' %>">
+              <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+                <i class="bi bi-search"></i> Search
+              </button>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="input-group">
+              <span class="input-group-text">Importance</span>
+              <select class="form-select" id="importanceFilter">
+                <option value="">All</option>
+                <option value="3">3+ (Important)</option>
+                <option value="4">4+ (Very Important)</option>
+                <option value="5">5 (Critical)</option>
+              </select>
+              <button class="btn btn-outline-secondary" type="button" id="applyFilters">Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memories Grid -->
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4" id="memoriesGrid">
+      <% if (memories && memories.length > 0) { %>
+        <% memories.forEach(memory => { %>
+          <div class="col">
+            <div class="card h-100 memory-card shadow-sm">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0"><%= memory.title %></h5>
+                <span class="badge bg-<%= memory.importance >= 4 ? 'danger' : (memory.importance >= 3 ? 'warning' : 'info') %> memory-importance">
+                  <%= memory.importance %>
+                </span>
+              </div>
+              <div class="card-body">
+                <p class="card-text memory-content"><%= memory.content.length > 300 ? memory.content.substring(0, 300) + '...' : memory.content %></p>
+                <div class="d-flex justify-content-between mt-3">
+                  <small class="text-muted">
+                    <i class="bi bi-clock"></i> <%= new Date(memory.created_at).toLocaleDateString() %>
+                  </small>
+                  <% if (memory.expires_at) { %>
+                    <small class="text-muted">
+                      <i class="bi bi-hourglass"></i> Expires: <%= new Date(memory.expires_at).toLocaleDateString() %>
+                    </small>
+                  <% } else { %>
+                    <small class="text-success">
+                      <i class="bi bi-pin"></i> Permanent
+                    </small>
+                  <% } %>
+                </div>
+              </div>
+              <div class="card-footer bg-transparent">
+                <div class="d-flex justify-content-between">
+                  <button class="btn btn-sm btn-outline-primary" onclick="viewMemory(<%= memory.id %>)">
+                    <i class="bi bi-eye"></i> View
+                  </button>
+                  <div>
+                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="editMemory(<%= memory.id %>)">
+                      <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteMemory(<%= memory.id %>)">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% }); %>
+      <% } else { %>
+        <div class="col-12">
+          <div class="text-center p-5">
+            <p class="text-muted">No memories found. Create one or add text on the input page.</p>
+            <a href="/input" class="btn btn-outline-primary">Go to Input Page</a>
+          </div>
+        </div>
+      <% } %>
+    </div>
+  </div>
+
+  <!-- New Memory Modal -->
+  <div class="modal fade" id="newMemoryModal" tabindex="-1" aria-labelledby="newMemoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="newMemoryModalLabel">New Memory</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="newMemoryForm">
+            <div class="mb-3">
+              <label for="title" class="form-label">Title</label>
+              <input type="text" class="form-control" id="title" required>
+            </div>
+            <div class="mb-3">
+              <label for="content" class="form-label">Content</label>
+              <textarea class="form-control" id="content" rows="6" required></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="context" class="form-label">Context <small class="text-muted">(optional)</small></label>
+              <textarea class="form-control" id="context" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="participants" class="form-label">Participants <small class="text-muted">(optional, comma-separated)</small></label>
+              <input type="text" class="form-control" id="participants" placeholder="e.g. John, Sarah, Team Alpha">
+            </div>
+            <div class="mb-3">
+              <label for="keyPoints" class="form-label">Key Points <small class="text-muted">(optional, one per line)</small></label>
+              <textarea class="form-control" id="keyPoints" rows="3" placeholder="- Main takeaway 1&#10;- Main takeaway 2"></textarea>
+            </div>
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="importance" class="form-label">Importance</label>
+                <select class="form-select" id="importance">
+                  <option value="1">1 (Low)</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3 (Medium)</option>
+                  <option value="4">4</option>
+                  <option value="5">5 (High)</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="expiration" class="form-label">Expiration</label>
+                <div class="d-flex">
+                  <select class="form-select me-2" id="expirationType">
+                    <option value="permanent">Permanent</option>
+                    <option value="temporary">Temporary</option>
+                  </select>
+                  <input type="date" class="form-control" id="expirationDate" disabled>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="saveMemory">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Memory Modal -->
+  <div class="modal fade" id="editMemoryModal" tabindex="-1" aria-labelledby="editMemoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editMemoryModalLabel">Edit Memory</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editMemoryForm">
+            <input type="hidden" id="editMemoryId">
+            <div class="mb-3">
+              <label for="editTitle" class="form-label">Title</label>
+              <input type="text" class="form-control" id="editTitle" required>
+            </div>
+            <div class="mb-3">
+              <label for="editContent" class="form-label">Content</label>
+              <textarea class="form-control" id="editContent" rows="6" required></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="editContext" class="form-label">Context <small class="text-muted">(optional)</small></label>
+              <textarea class="form-control" id="editContext" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="editParticipants" class="form-label">Participants <small class="text-muted">(optional, comma-separated)</small></label>
+              <input type="text" class="form-control" id="editParticipants" placeholder="e.g. John, Sarah, Team Alpha">
+            </div>
+            <div class="mb-3">
+              <label for="editKeyPoints" class="form-label">Key Points <small class="text-muted">(optional, one per line)</small></label>
+              <textarea class="form-control" id="editKeyPoints" rows="3" placeholder="- Main takeaway 1&#10;- Main takeaway 2"></textarea>
+            </div>
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="editImportance" class="form-label">Importance</label>
+                <select class="form-select" id="editImportance">
+                  <option value="1">1 (Low)</option>
+                  <option value="2">2</option>
+                  <option value="3">3 (Medium)</option>
+                  <option value="4">4</option>
+                  <option value="5">5 (High)</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="editExpiration" class="form-label">Expiration</label>
+                <div class="d-flex">
+                  <select class="form-select me-2" id="editExpirationType">
+                    <option value="permanent">Permanent</option>
+                    <option value="temporary">Temporary</option>
+                  </select>
+                  <input type="date" class="form-control" id="editExpirationDate">
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="updateMemory">Update</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- View Memory Modal -->
+  <div class="modal fade" id="viewMemoryModal" tabindex="-1" aria-labelledby="viewMemoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="viewMemoryModalLabel"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-4">
+            <div id="viewMemoryContent" class="mb-3"></div>
+            
+            <div id="viewMemoryContextSection" class="mb-3 d-none">
+              <h6 class="text-muted mb-2">Context:</h6>
+              <div id="viewMemoryContext" class="p-2 bg-light rounded"></div>
+            </div>
+            
+            <div id="viewMemoryParticipantsSection" class="mb-3 d-none">
+              <h6 class="text-muted mb-2">Participants:</h6>
+              <div id="viewMemoryParticipants"></div>
+            </div>
+            
+            <div id="viewMemoryKeyPointsSection" class="mb-3 d-none">
+              <h6 class="text-muted mb-2">Key Points:</h6>
+              <ul id="viewMemoryKeyPoints" class="mb-0"></ul>
+            </div>
+          </div>
+          
+          <div class="d-flex justify-content-between text-muted small">
+            <div>
+              <i class="bi bi-info-circle"></i> Importance: <span id="viewMemoryImportance"></span>
+            </div>
+            <div id="viewMemoryExpiration"></div>
+            <div>
+              <i class="bi bi-calendar-check"></i> Created: <span id="viewMemoryCreated"></span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="py-4 bg-dark">
+    <div class="container">
+      <p class="m-0 text-center text-white">
+        &copy; 2023 GenOmi Brain Memory System
+      </p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Expiration type toggle
+    document.getElementById('expirationType').addEventListener('change', function() {
+      const expirationDate = document.getElementById('expirationDate');
+      if (this.value === 'temporary') {
+        expirationDate.disabled = false;
+        
+        // Set default date to 30 days from now
+        const date = new Date();
+        date.setDate(date.getDate() + 30);
+        expirationDate.value = date.toISOString().split('T')[0];
+      } else {
+        expirationDate.disabled = true;
+        expirationDate.value = '';
+      }
+    });
+    
+    document.getElementById('editExpirationType').addEventListener('change', function() {
+      const expirationDate = document.getElementById('editExpirationDate');
+      if (this.value === 'temporary') {
+        expirationDate.disabled = false;
+        
+        // If no date already set, set default to 30 days from now
+        if (!expirationDate.value) {
+          const date = new Date();
+          date.setDate(date.getDate() + 30);
+          expirationDate.value = date.toISOString().split('T')[0];
+        }
+      } else {
+        expirationDate.disabled = true;
+      }
+    });
+    
+    // Search
+    document.getElementById('searchBtn').addEventListener('click', () => {
+      const searchQuery = document.getElementById('searchInput').value.trim();
+      if (searchQuery) {
+        window.location.href = `/memories/search?q=${encodeURIComponent(searchQuery)}`;
+      }
+    });
+    
+    // Enter key for search
+    document.getElementById('searchInput').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('searchBtn').click();
+      }
+    });
+    
+    // Apply filters
+    document.getElementById('applyFilters').addEventListener('click', () => {
+      const importance = document.getElementById('importanceFilter').value;
+      
+      let url = '/memories?';
+      if (importance) url += `importance=${importance}&`;
+      
+      window.location.href = url;
+    });
+    
+    // Create new memory
+    document.getElementById('saveMemory').addEventListener('click', async () => {
+      const title = document.getElementById('title').value.trim();
+      const content = document.getElementById('content').value.trim();
+      
+      if (!title || !content) return;
+      
+      const context = document.getElementById('context').value.trim();
+      const participantsStr = document.getElementById('participants').value.trim();
+      const keyPointsStr = document.getElementById('keyPoints').value.trim();
+      
+      const importance = document.getElementById('importance').value;
+      const expirationType = document.getElementById('expirationType').value;
+      const expirationDate = document.getElementById('expirationDate').value;
+      
+      let expires_at = null;
+      if (expirationType === 'temporary' && expirationDate) {
+        expires_at = expirationDate;
+      }
+      
+      // Process participants into an array
+      const participants = participantsStr ? participantsStr.split(',').map(p => p.trim()).filter(p => p) : null;
+      
+      // Process key points into an array
+      const keyPoints = keyPointsStr ? keyPointsStr.split('\n').map(p => p.trim()).filter(p => p) : null;
+      
+      try {
+        const response = await fetch('/memories', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title,
+            content,
+            context: context || null,
+            participants,
+            key_points: keyPoints,
+            importance,
+            expires_at
+          })
+        });
+        
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          alert('Error creating memory');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error creating memory');
+      }
+    });
+    
+    // View memory
+    function viewMemory(id) {
+      fetch(`/memories/api/${id}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.memory) {
+            const memory = data.memory;
+            
+            document.getElementById('viewMemoryModalLabel').textContent = memory.title;
+            const contentEl = document.getElementById('viewMemoryContent');
+            contentEl.textContent = memory.content;
+            contentEl.style.whiteSpace = 'pre-wrap';  // Preserve line breaks and spacing
+            contentEl.style.maxHeight = '60vh';       // Limit height with scroll
+            contentEl.style.overflowY = 'auto';       // Add scrolling for very long content
+            document.getElementById('viewMemoryImportance').textContent = memory.importance;
+            document.getElementById('viewMemoryCreated').textContent = new Date(memory.created_at).toLocaleString();
+            
+            const expirationEl = document.getElementById('viewMemoryExpiration');
+            if (memory.expires_at) {
+              expirationEl.innerHTML = `<i class="bi bi-hourglass"></i> Expires: ${new Date(memory.expires_at).toLocaleDateString()}`;
+            } else {
+              expirationEl.innerHTML = `<i class="bi bi-pin"></i> Permanent`;
+            }
+            
+            // Display context if available
+            const contextSection = document.getElementById('viewMemoryContextSection');
+            const contextEl = document.getElementById('viewMemoryContext');
+            if (memory.context) {
+              contextEl.textContent = memory.context;
+              contextSection.classList.remove('d-none');
+            } else {
+              contextSection.classList.add('d-none');
+            }
+            
+            // Display participants if available
+            const participantsSection = document.getElementById('viewMemoryParticipantsSection');
+            const participantsEl = document.getElementById('viewMemoryParticipants');
+            if (memory.participants) {
+              try {
+                const participants = typeof memory.participants === 'string' ? 
+                  JSON.parse(memory.participants) : memory.participants;
+                
+                if (Array.isArray(participants) && participants.length > 0) {
+                  participantsEl.innerHTML = participants.map(p => 
+                    `<span class="badge bg-secondary me-1 mb-1">${p}</span>`
+                  ).join('');
+                  participantsSection.classList.remove('d-none');
+                } else {
+                  participantsSection.classList.add('d-none');
+                }
+              } catch (e) {
+                participantsSection.classList.add('d-none');
+              }
+            } else {
+              participantsSection.classList.add('d-none');
+            }
+            
+            // Display key points if available
+            const keyPointsSection = document.getElementById('viewMemoryKeyPointsSection');
+            const keyPointsEl = document.getElementById('viewMemoryKeyPoints');
+            if (memory.key_points) {
+              try {
+                const keyPoints = typeof memory.key_points === 'string' ? 
+                  JSON.parse(memory.key_points) : memory.key_points;
+                
+                if (Array.isArray(keyPoints) && keyPoints.length > 0) {
+                  keyPointsEl.innerHTML = keyPoints.map(point => 
+                    `<li>${point}</li>`
+                  ).join('');
+                  keyPointsSection.classList.remove('d-none');
+                } else {
+                  keyPointsSection.classList.add('d-none');
+                }
+              } catch (e) {
+                keyPointsSection.classList.add('d-none');
+              }
+            } else {
+              keyPointsSection.classList.add('d-none');
+            }
+            
+            // Show modal
+            new bootstrap.Modal(document.getElementById('viewMemoryModal')).show();
+          } else {
+            alert('Error loading memory');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Error loading memory');
+        });
+    }
+    
+    // Edit memory
+    function editMemory(id) {
+      fetch(`/memories/api/${id}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.memory) {
+            const memory = data.memory;
+            
+            document.getElementById('editMemoryId').value = memory.id;
+            document.getElementById('editTitle').value = memory.title;
+            document.getElementById('editContent').value = memory.content;
+            
+            // Set context if available
+            const contextEl = document.getElementById('editContext');
+            if (memory.context) {
+              contextEl.value = memory.context;
+            } else {
+              contextEl.value = '';
+            }
+            
+            // Set participants if available
+            const participantsEl = document.getElementById('editParticipants');
+            if (memory.participants) {
+              try {
+                const participants = typeof memory.participants === 'string' ? 
+                  JSON.parse(memory.participants) : memory.participants;
+                
+                if (Array.isArray(participants)) {
+                  participantsEl.value = participants.join(', ');
+                } else {
+                  participantsEl.value = '';
+                }
+              } catch (e) {
+                participantsEl.value = '';
+              }
+            } else {
+              participantsEl.value = '';
+            }
+            
+            // Set key points if available
+            const keyPointsEl = document.getElementById('editKeyPoints');
+            if (memory.key_points) {
+              try {
+                const keyPoints = typeof memory.key_points === 'string' ? 
+                  JSON.parse(memory.key_points) : memory.key_points;
+                
+                if (Array.isArray(keyPoints)) {
+                  keyPointsEl.value = keyPoints.join('\n');
+                } else {
+                  keyPointsEl.value = '';
+                }
+              } catch (e) {
+                keyPointsEl.value = '';
+              }
+            } else {
+              keyPointsEl.value = '';
+            }
+            
+            document.getElementById('editImportance').value = memory.importance;
+            
+            const expirationType = document.getElementById('editExpirationType');
+            const expirationDate = document.getElementById('editExpirationDate');
+            
+            if (memory.expires_at) {
+              expirationType.value = 'temporary';
+              expirationDate.disabled = false;
+              
+              // Format date for input element
+              const date = new Date(memory.expires_at);
+              const formattedDate = date.toISOString().split('T')[0];
+              expirationDate.value = formattedDate;
+            } else {
+              expirationType.value = 'permanent';
+              expirationDate.disabled = true;
+              expirationDate.value = '';
+            }
+            
+            // Show modal
+            new bootstrap.Modal(document.getElementById('editMemoryModal')).show();
+          } else {
+            alert('Error loading memory');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Error loading memory');
+        });
+    }
+    
+    // Update memory
+    document.getElementById('updateMemory').addEventListener('click', async () => {
+      const id = document.getElementById('editMemoryId').value;
+      const title = document.getElementById('editTitle').value.trim();
+      const content = document.getElementById('editContent').value.trim();
+      
+      if (!title || !content) return;
+      
+      const context = document.getElementById('editContext').value.trim();
+      const participantsStr = document.getElementById('editParticipants').value.trim();
+      const keyPointsStr = document.getElementById('editKeyPoints').value.trim();
+      
+      const importance = document.getElementById('editImportance').value;
+      const expirationType = document.getElementById('editExpirationType').value;
+      const expirationDate = document.getElementById('editExpirationDate').value;
+      
+      let expires_at = null;
+      if (expirationType === 'temporary' && expirationDate) {
+        expires_at = expirationDate;
+      }
+      
+      // Process participants into an array
+      const participants = participantsStr ? participantsStr.split(',').map(p => p.trim()).filter(p => p) : null;
+      
+      // Process key points into an array
+      const keyPoints = keyPointsStr ? keyPointsStr.split('\n').map(p => p.trim()).filter(p => p) : null;
+      
+      try {
+        const response = await fetch(`/memories/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title,
+            content,
+            context: context || null,
+            participants,
+            key_points: keyPoints,
+            importance,
+            expires_at
+          })
+        });
+        
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          alert('Error updating memory');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error updating memory');
+      }
+    });
+    
+    // Delete memory
+    function deleteMemory(id) {
+      if (confirm('Are you sure you want to delete this memory?')) {
+        fetch(`/memories/${id}`, {
+          method: 'DELETE'
+        })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              window.location.reload();
+            } else {
+              alert('Error deleting memory');
+            }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting memory');
+          });
+      }
+    }
+  </script>
+</body>
+</html> 

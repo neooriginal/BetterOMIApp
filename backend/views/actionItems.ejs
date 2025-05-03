@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> - GenOmi</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand" href="/">GenOmi</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/input">Input</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link active" href="/action-items">Action Items</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/memories">Memories</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="mb-0">Action Items</h1>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newActionItemModal">
+        <i class="bi bi-plus-circle me-1"></i> New Action Item
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6">
+            <div class="input-group mb-3 mb-md-0">
+              <span class="input-group-text">Status</span>
+              <select class="form-select" id="statusFilter">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="input-group">
+              <span class="input-group-text">Priority</span>
+              <select class="form-select" id="priorityFilter">
+                <option value="">All</option>
+                <option value="1">1 (Low)</option>
+                <option value="2">2</option>
+                <option value="3">3 (Medium)</option>
+                <option value="4">4</option>
+                <option value="5">5 (High)</option>
+              </select>
+              <button class="btn btn-outline-secondary" type="button" id="applyFilters">Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Items List -->
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div id="actionItemsList">
+          <% if (actionItems && actionItems.length > 0) { %>
+            <% actionItems.forEach(item => { %>
+              <div class="action-item priority-<%= item.priority %> <%= item.status === 'completed' ? 'completed' : '' %>">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <h5 class="mb-1"><%= item.title %></h5>
+                    <p class="mb-1 text-muted"><%= item.description || 'No description' %></p>
+                    <div class="small">
+                      <% if (item.due_date) { %>
+                        <span class="me-3">
+                          <i class="bi bi-calendar me-1"></i>
+                          <%= new Date(item.due_date).toLocaleDateString() %>
+                        </span>
+                      <% } %>
+                      <span class="badge bg-<%= item.priority >= 4 ? 'danger' : (item.priority >= 3 ? 'warning' : 'secondary') %>">
+                        Priority <%= item.priority %>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="action-buttons">
+                    <% if (item.status !== 'completed') { %>
+                      <button class="btn btn-sm btn-outline-success me-1" onclick="completeItem(<%= item.id %>)">
+                        <i class="bi bi-check-circle"></i>
+                      </button>
+                    <% } %>
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editItem(<%= item.id %>)">
+                      <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteItem(<%= item.id %>)">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            <% }); %>
+          <% } else { %>
+            <div class="text-center p-5">
+              <p class="text-muted">No action items found. Create one or add text on the input page.</p>
+              <a href="/input" class="btn btn-outline-primary">Go to Input Page</a>
+            </div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Action Item Modal -->
+  <div class="modal fade" id="newActionItemModal" tabindex="-1" aria-labelledby="newActionItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="newActionItemModalLabel">New Action Item</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="newActionItemForm">
+            <div class="mb-3">
+              <label for="title" class="form-label">Title</label>
+              <input type="text" class="form-control" id="title" required>
+            </div>
+            <div class="mb-3">
+              <label for="description" class="form-label">Description</label>
+              <textarea class="form-control" id="description" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="dueDate" class="form-label">Due Date</label>
+              <input type="date" class="form-control" id="dueDate">
+            </div>
+            <div class="mb-3">
+              <label for="priority" class="form-label">Priority</label>
+              <select class="form-select" id="priority">
+                <option value="1">1 (Low)</option>
+                <option value="2">2</option>
+                <option value="3" selected>3 (Medium)</option>
+                <option value="4">4</option>
+                <option value="5">5 (High)</option>
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="saveActionItem">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Action Item Modal -->
+  <div class="modal fade" id="editActionItemModal" tabindex="-1" aria-labelledby="editActionItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editActionItemModalLabel">Edit Action Item</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editActionItemForm">
+            <input type="hidden" id="editItemId">
+            <div class="mb-3">
+              <label for="editTitle" class="form-label">Title</label>
+              <input type="text" class="form-control" id="editTitle" required>
+            </div>
+            <div class="mb-3">
+              <label for="editDescription" class="form-label">Description</label>
+              <textarea class="form-control" id="editDescription" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="editDueDate" class="form-label">Due Date</label>
+              <input type="date" class="form-control" id="editDueDate">
+            </div>
+            <div class="mb-3">
+              <label for="editPriority" class="form-label">Priority</label>
+              <select class="form-select" id="editPriority">
+                <option value="1">1 (Low)</option>
+                <option value="2">2</option>
+                <option value="3">3 (Medium)</option>
+                <option value="4">4</option>
+                <option value="5">5 (High)</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="editStatus" class="form-label">Status</label>
+              <select class="form-select" id="editStatus">
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="updateActionItem">Update</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="py-4 bg-dark">
+    <div class="container">
+      <p class="m-0 text-center text-white">
+        &copy; 2023 GenOmi Brain Memory System
+      </p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Apply filters
+    document.getElementById('applyFilters').addEventListener('click', () => {
+      const status = document.getElementById('statusFilter').value;
+      const priority = document.getElementById('priorityFilter').value;
+      
+      let url = '/action-items?';
+      if (status) url += `status=${status}&`;
+      if (priority) url += `priority=${priority}&`;
+      
+      window.location.href = url;
+    });
+    
+    // Create new action item
+    document.getElementById('saveActionItem').addEventListener('click', async () => {
+      const title = document.getElementById('title').value.trim();
+      if (!title) return;
+      
+      const description = document.getElementById('description').value.trim();
+      const dueDate = document.getElementById('dueDate').value;
+      const priority = document.getElementById('priority').value;
+      
+      try {
+        const response = await fetch('/action-items', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title,
+            description,
+            due_date: dueDate || null,
+            priority
+          })
+        });
+        
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          alert('Error creating action item');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error creating action item');
+      }
+    });
+    
+    // Edit action item
+    function editItem(id) {
+      fetch(`/action-items/api/${id}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.actionItem) {
+            const item = data.actionItem;
+            
+            document.getElementById('editItemId').value = item.id;
+            document.getElementById('editTitle').value = item.title;
+            document.getElementById('editDescription').value = item.description || '';
+            
+            if (item.due_date) {
+              // Format date for input element
+              const dueDate = new Date(item.due_date);
+              const formattedDate = dueDate.toISOString().split('T')[0];
+              document.getElementById('editDueDate').value = formattedDate;
+            } else {
+              document.getElementById('editDueDate').value = '';
+            }
+            
+            document.getElementById('editPriority').value = item.priority;
+            document.getElementById('editStatus').value = item.status;
+            
+            // Show modal
+            new bootstrap.Modal(document.getElementById('editActionItemModal')).show();
+          } else {
+            alert('Error loading action item');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Error loading action item');
+        });
+    }
+    
+    // Update action item
+    document.getElementById('updateActionItem').addEventListener('click', async () => {
+      const id = document.getElementById('editItemId').value;
+      const title = document.getElementById('editTitle').value.trim();
+      if (!title) return;
+      
+      const description = document.getElementById('editDescription').value.trim();
+      const dueDate = document.getElementById('editDueDate').value;
+      const priority = document.getElementById('editPriority').value;
+      const status = document.getElementById('editStatus').value;
+      
+      try {
+        const response = await fetch(`/action-items/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title,
+            description,
+            due_date: dueDate || null,
+            priority,
+            status
+          })
+        });
+        
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          alert('Error updating action item');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error updating action item');
+      }
+    });
+    
+    // Complete action item
+    function completeItem(id) {
+      fetch(`/action-items/${id}/complete`, {
+        method: 'POST'
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            window.location.reload();
+          } else {
+            alert('Error completing action item');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Error completing action item');
+        });
+    }
+    
+    // Delete action item
+    function deleteItem(id) {
+      if (confirm('Are you sure you want to delete this action item?')) {
+        fetch(`/action-items/${id}`, {
+          method: 'DELETE'
+        })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              window.location.reload();
+            } else {
+              alert('Error deleting action item');
+            }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting action item');
+          });
+      }
+    }
+  </script>
+</body>
+</html> 
