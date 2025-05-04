@@ -73,7 +73,7 @@ function createDeepgramConnection(sessionId) {
     try {
       console.log(`Creating Deepgram connection with API key: ${DEEPGRAM_API_KEY ? "Available (length: " + DEEPGRAM_API_KEY.length + ")" : "NOT AVAILABLE"}`);
       
-      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en-US&encoding=linear16&sample_rate=16000&channels=1";
+      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1";
       
       const ws = new WebSocket(url, {
         headers: {

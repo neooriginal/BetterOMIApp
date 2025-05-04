@@ -4,3 +4,4 @@ backend/.env
 backend/package-lock.json
 python/.env
 .env
+/python/omi/__pycache__

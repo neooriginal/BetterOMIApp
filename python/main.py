@@ -55,9 +55,7 @@ def send_audio_to_backend(audio_data):
         }
         
         response = requests.post(AUDIO_STREAM_ENDPOINT, json=payload)
-        if response.status_code == 200:
-            print("Audio data sent to backend")
-        else:
+        if response.status_code != 200:
             print(f"Error sending audio to backend: {response.status_code}")
     except Exception as e:
         print(f"Error connecting to backend: {e}")

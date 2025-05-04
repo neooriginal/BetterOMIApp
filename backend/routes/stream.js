@@ -36,9 +36,6 @@ router.post('/audio', async (req, res) => {
         message: 'Session ID is required'
       });
     }
-
-    console.log(`Received audio data for session ${sessionId} (length: ${audioData.length} chars)`);
-
     try {
       // Pass audio data to Deepgram service for transcription
       // The service will handle sending the text back to our stream endpoint
