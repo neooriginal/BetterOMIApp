@@ -58,94 +58,15 @@ app.get('/health', (req, res) => {
 // Create HTTP server
 const server = http.createServer(app);
 
-// Track active connections for graceful shutdown
-const connections = new Set();
-server.on('connection', (connection) => {
-  connections.add(connection);
-  connection.on('close', () => {
-    connections.delete(connection);
-  });
-});
-
 // Start the server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Implement graceful shutdown
-function gracefulShutdown(signal) {
-  console.log(`\n${signal} received. Starting graceful shutdown...`);
-  
-  // Prevent multiple shutdown attempts
-  if (server.shuttingDown) {
-    console.log('Shutdown already in progress');
-    return;
-  }
-  
-  server.shuttingDown = true;
-  
-  // Create a shutdown timeout (force exit after 30 seconds)
-  const forceExit = setTimeout(() => {
-    console.error('Forcing exit after timeout');
-    process.exit(1);
-  }, 30000);
-  
-  // First, stop accepting new connections
-  server.close(() => {
-    console.log('HTTP server closed');
-    
-    // Clean up all existing connections
-    for (const connection of connections) {
-      try {
-        connection.destroy();
-      } catch (err) {
-        // Ignore errors when destroying connections
-      }
-    }
-    
-    // Close database connection with a safe check
-    if (db.db) {
-      try {
-        // Check if database is still open
-        if (db.db.open) {
-          db.db.close((err) => {
-            if (err) {
-              console.error('Error closing database:', err);
-            } else {
-              console.log('Database connection closed');
-            }
-            
-            // Clear the force exit timeout and exit normally
-            clearTimeout(forceExit);
-            process.exit(0);
-          });
-        } else {
-          console.log('Database already closed');
-          clearTimeout(forceExit);
-          process.exit(0);
-        }
-      } catch (err) {
-        console.error('Error checking database state:', err);
-        clearTimeout(forceExit);
-        process.exit(0);
-      }
-    } else {
-      clearTimeout(forceExit);
-      process.exit(0);
-    }
-  });
-}
-
-// Handle different termination signals
-['SIGINT', 'SIGTERM', 'SIGQUIT'].forEach(signal => {
-  process.on(signal, () => gracefulShutdown(signal));
-});
-
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
 // Handle unhandled promise rejections
