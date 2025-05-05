@@ -39,21 +39,18 @@ const inputRoutes = require('./routes/input');
 const actionItemsRoutes = require('./routes/actionItems');
 const memoriesRoutes = require('./routes/memories');
 const streamRoutes = require('./routes/stream');
+const transcriptionsRoutes = require('./routes/transcriptions');
 
 // Register routes
 app.use('/input', inputRoutes);
 app.use('/action-items', actionItemsRoutes);
 app.use('/memories', memoriesRoutes);
 app.use('/stream', streamRoutes);
+app.use('/transcriptions', transcriptionsRoutes);
 
 // Home route
 app.get('/', (req, res) => {
-  res.render('index');
-});
-
-// Stream demo page
-app.get('/stream-demo', (req, res) => {
-  res.render('stream_demo');
+  res.render('memories');
 });
 
 // Health check endpoint

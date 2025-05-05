@@ -1,4 +1,5 @@
 const { run, get, all } = require('../models/database');
+const transcriptionService = require('./transcriptionService');
 
 /**
  * Create a new memory
@@ -193,9 +194,10 @@ async function deleteMemory(id) {
 /**
  * Process memories from LLM extraction
  * @param {Array} memories - Memories extracted by LLM
+ * @param {string} sessionId - Session ID for linking transcriptions
  * @returns {Promise<Array>} - Created memories
  */
-async function processMemories(memories) {
+async function processMemories(memories, sessionId) {
   const results = [];
   
   try {
@@ -248,23 +250,38 @@ async function processMemories(memories) {
           
           const memory = await createMemory(memoryData);
           
-          console.log(`Successfully created memory with ID: ${memory.id}`);
+          // If sessionId is provided, find the latest transcription and link it to this memory
+          if (sessionId) {
+            try {
+              // Get all transcriptions for this session
+              const transcriptions = await transcriptionService.getTranscriptions({ 
+                session_id: sessionId,
+                sortBy: 'created_at',
+                sortOrder: 'DESC'
+              });
+              
+              // Link the most recent transcription to this memory
+              if (transcriptions && transcriptions.length > 0) {
+                await transcriptionService.linkTranscriptionToMemory(transcriptions[0].id, memory.id);
+                console.log(`Linked transcription ${transcriptions[0].id} to memory ${memory.id}`);
+              }
+            } catch (err) {
+              console.error('Error linking transcription to memory:', err);
+            }
+          }
+          
           results.push(memory);
-        } catch (error) {
-          console.error('Error creating individual memory:', error);
-          console.error(error.stack);
+        } catch (memoryError) {
+          console.error('Error creating memory:', memoryError);
         }
       }
       
-      console.log(`Successfully created ${results.length} memories out of ${memories.length} attempts`);
-    } else {
-      console.log('No memories to process - received', memories);
+      return results;
     }
     
-    return results;
+    return [];
   } catch (error) {
     console.error('Error processing memories:', error);
-    console.error(error.stack);
     throw error;
   }
 }

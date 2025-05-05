@@ -117,6 +117,16 @@ async function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (from_node_id) REFERENCES brain_nodes (id),
       FOREIGN KEY (to_node_id) REFERENCES brain_nodes (id)
+    )`),
+    
+    run(`CREATE TABLE IF NOT EXISTS transcriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      text TEXT NOT NULL,
+      session_id TEXT,
+      memory_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME,
+      FOREIGN KEY (memory_id) REFERENCES memories (id) ON DELETE SET NULL
     )`)
   ]).then(() => {
     console.log('Database tables initialized');
@@ -196,6 +206,9 @@ async function cleanupExpiredItems() {
     
     // Delete expired memories
     await run(`DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?`, [now]);
+    
+    // Delete expired transcriptions
+    await run(`DELETE FROM transcriptions WHERE expires_at IS NOT NULL AND expires_at < ?`, [now]);
     
     console.log('Cleanup of expired items completed');
   } catch (error) {

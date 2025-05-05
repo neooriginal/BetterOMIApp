@@ -8,15 +8,6 @@ const actionItemsService = require('../services/actionItemsService');
 const memoriesService = require('../services/memoriesService');
 
 /**
- * Route for the input form page
- */
-router.get('/', (req, res) => {
-  res.render('input', {
-    title: 'Input Text'
-  });
-});
-
-/**
  * Process text input with LLM and save extracted information
  */
 router.post('/process', async (req, res) => {

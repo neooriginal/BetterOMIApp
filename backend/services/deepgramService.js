@@ -5,6 +5,7 @@ const WebSocket = require('ws');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const path = require('path');
+const transcriptionService = require('./transcriptionService');
 
 // Load environment variables from .env file in the root directory
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -24,8 +25,29 @@ const activeConnections = new Map();
 // Connection status tracking
 const connectionStatus = new Map();
 
+// Transcription buffers for combining fragments
+const transcriptionBuffers = new Map();
+
+// Transcription timeouts for processing after inactivity
+const transcriptionTimeouts = new Map();
+
+// Keep-alive intervals for each connection
+const keepAliveIntervals = new Map();
+
+// Auto-close timeouts for inactive connections
+const autoCloseTimeouts = new Map();
+
+// Inactivity threshold in milliseconds (20 seconds)
+const TRANSCRIPTION_INACTIVITY_THRESHOLD = 20000;
+
 // Connection health check interval (15 seconds)
 const HEALTH_CHECK_INTERVAL = 15000;
+
+// Keep-alive ping interval (15 seconds)
+const KEEP_ALIVE_INTERVAL = 15000;
+
+// Auto-close timeout (30 seconds of audio inactivity)
+const AUTO_CLOSE_TIMEOUT = 30000;
 
 // Max reconnection attempts
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -76,6 +98,12 @@ async function processAudio(audioData, sessionId) {
           lastActive: Date.now()
         });
         
+        // Setup keep-alive for this connection
+        setupKeepAlive(sessionId, wsConnection);
+        
+        // Setup auto-close timeout for this connection
+        resetAutoCloseTimeout(sessionId);
+        
         // Start health check if not already running
         startHealthCheck();
       } catch (error) {
@@ -84,10 +112,11 @@ async function processAudio(audioData, sessionId) {
       }
     }
     
-    // Update last active timestamp
+    // Update last active timestamp and reset autoclose timer
     if (status) {
       status.lastActive = Date.now();
       connectionStatus.set(sessionId, status);
+      resetAutoCloseTimeout(sessionId);
     }
     
     // Send audio data to Deepgram
@@ -119,6 +148,105 @@ async function processAudio(audioData, sessionId) {
 }
 
 /**
+ * Set up keep-alive mechanism for a WebSocket connection
+ * @param {string} sessionId - Session ID
+ * @param {WebSocket} ws - WebSocket connection
+ */
+function setupKeepAlive(sessionId, ws) {
+  // Clear any existing interval
+  if (keepAliveIntervals.has(sessionId)) {
+    clearInterval(keepAliveIntervals.get(sessionId));
+  }
+  
+  // Set up a new keep-alive interval
+  const interval = setInterval(() => {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Send a keep-alive ping to prevent Deepgram from closing the connection
+        ws.ping();
+        console.log(`Sent keep-alive ping for session ${sessionId}`);
+      } else {
+        // WebSocket is not open, clear interval
+        clearInterval(interval);
+        keepAliveIntervals.delete(sessionId);
+      }
+    } catch (err) {
+      console.error(`Error sending keep-alive ping for session ${sessionId}:`, err);
+      clearInterval(interval);
+      keepAliveIntervals.delete(sessionId);
+    }
+  }, KEEP_ALIVE_INTERVAL);
+  
+  keepAliveIntervals.set(sessionId, interval);
+}
+
+/**
+ * Reset auto-close timeout for an inactive connection
+ * @param {string} sessionId - Session ID
+ */
+function resetAutoCloseTimeout(sessionId) {
+  // Clear any existing timeout
+  if (autoCloseTimeouts.has(sessionId)) {
+    clearTimeout(autoCloseTimeouts.get(sessionId));
+  }
+  
+  // Set a new timeout to close the connection after inactivity
+  const timeout = setTimeout(() => {
+    console.log(`Auto-closing inactive connection for session ${sessionId} after ${AUTO_CLOSE_TIMEOUT/1000}s of audio inactivity`);
+    
+    // Process any buffered transcription
+    if (transcriptionBuffers.has(sessionId)) {
+      processBufferedTranscription(sessionId);
+    }
+    
+    // Close the connection gracefully
+    closeConnection(sessionId);
+  }, AUTO_CLOSE_TIMEOUT);
+  
+  autoCloseTimeouts.set(sessionId, timeout);
+}
+
+/**
+ * Close a WebSocket connection gracefully
+ * @param {string} sessionId - Session ID
+ */
+function closeConnection(sessionId) {
+  // Clean up keep-alive interval
+  if (keepAliveIntervals.has(sessionId)) {
+    clearInterval(keepAliveIntervals.get(sessionId));
+    keepAliveIntervals.delete(sessionId);
+  }
+  
+  // Clean up auto-close timeout
+  if (autoCloseTimeouts.has(sessionId)) {
+    clearTimeout(autoCloseTimeouts.get(sessionId));
+    autoCloseTimeouts.delete(sessionId);
+  }
+  
+  // Get the WebSocket
+  const ws = activeConnections.get(sessionId);
+  if (ws) {
+    try {
+      // Send close frame to Deepgram
+      if (ws.readyState === WebSocket.OPEN) {
+        console.log(`Sending close frame for session ${sessionId}`);
+        ws.close(1000, "Closing due to inactivity");
+      } else {
+        // Force terminate if not in OPEN state
+        ws.terminate();
+      }
+    } catch (e) {
+      console.error(`Error closing WebSocket for session ${sessionId}:`, e);
+    }
+    
+    // Remove from maps
+    activeConnections.delete(sessionId);
+    connectionStatus.delete(sessionId);
+    console.log(`Closed connection for session ${sessionId}`);
+  }
+}
+
+/**
  * Handle WebSocket connection failure
  * @param {string} sessionId - Session ID for this connection
  */
@@ -135,6 +263,17 @@ async function handleConnectionFailure(sessionId) {
   const existingWs = activeConnections.get(sessionId);
   if (existingWs) {
     try {
+      // Clean up the connection
+      if (keepAliveIntervals.has(sessionId)) {
+        clearInterval(keepAliveIntervals.get(sessionId));
+        keepAliveIntervals.delete(sessionId);
+      }
+      
+      if (autoCloseTimeouts.has(sessionId)) {
+        clearTimeout(autoCloseTimeouts.get(sessionId));
+        autoCloseTimeouts.delete(sessionId);
+      }
+      
       existingWs.terminate();
     } catch (e) {
       console.error(`Error terminating WebSocket for session ${sessionId}:`, e);
@@ -149,8 +288,26 @@ async function handleConnectionFailure(sessionId) {
   // Check if we've exceeded max attempts
   if (status.reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
     console.error(`Exceeded maximum reconnection attempts for session ${sessionId}`);
+    
+    // Clean up all resources for this session
     activeConnections.delete(sessionId);
     connectionStatus.delete(sessionId);
+    
+    if (keepAliveIntervals.has(sessionId)) {
+      clearInterval(keepAliveIntervals.get(sessionId));
+      keepAliveIntervals.delete(sessionId);
+    }
+    
+    if (autoCloseTimeouts.has(sessionId)) {
+      clearTimeout(autoCloseTimeouts.get(sessionId));
+      autoCloseTimeouts.delete(sessionId);
+    }
+    
+    // Process any remaining buffered transcription
+    if (transcriptionBuffers.has(sessionId)) {
+      await processBufferedTranscription(sessionId);
+    }
+    
     return;
   }
   
@@ -164,6 +321,12 @@ async function handleConnectionFailure(sessionId) {
     status.readyState = WebSocket.OPEN;
     status.lastActive = Date.now();
     connectionStatus.set(sessionId, status);
+    
+    // Setup keep-alive for new connection
+    setupKeepAlive(sessionId, newWs);
+    
+    // Reset auto-close timeout
+    resetAutoCloseTimeout(sessionId);
     
     console.log(`Successfully reconnected Deepgram for session ${sessionId}`);
   } catch (error) {
@@ -181,7 +344,13 @@ function createDeepgramConnection(sessionId) {
     try {
       console.log(`Creating Deepgram connection for session ${sessionId}`);
       
-      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1";
+      // Enhanced configuration for better accuracy
+      // - higher endpointing threshold to reduce word splitting
+      // - utterances for sentence grouping
+      // - model=nova-3 for best accuracy
+      // - endpointing=500 to wait longer for continuation
+      // - interim_results=true to get continuous results
+      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing=500&utterances=true&interim_results=true";
       
       const ws = new WebSocket(url, {
         headers: {
@@ -214,13 +383,17 @@ function createDeepgramConnection(sessionId) {
           // Extract transcript from the response
           if ("channel" in response && "alternatives" in response.channel) {
             const transcript = response.channel.alternatives[0].transcript || "";
+            const is_final = response.is_final || false;
             
             if (transcript && transcript.trim()) {
               const cleanTranscript = transcript.trim();
-              console.log(`\nTranscript for session ${sessionId}:`, cleanTranscript);
+              console.log(`\nTranscript for session ${sessionId} ${is_final ? '(FINAL)' : '(INTERIM)'}:`, cleanTranscript);
               
-              // Send the transcribed text to our stream endpoint to be processed
-              await sendTranscriptToStream(cleanTranscript, sessionId);
+              // Only process final transcripts
+              if (is_final) {
+                // Add to buffer or create new one
+                bufferTranscription(cleanTranscript, sessionId);
+              }
               
               // Update last active timestamp
               const status = connectionStatus.get(sessionId);
@@ -228,11 +401,19 @@ function createDeepgramConnection(sessionId) {
                 status.lastActive = Date.now();
                 connectionStatus.set(sessionId, status);
               }
+              
+              // Reset auto-close timeout since we're receiving data
+              resetAutoCloseTimeout(sessionId);
             }
           }
         } catch (error) {
           console.error(`Error processing Deepgram message: ${error}`);
         }
+      });
+      
+      // Handle WebSocket pong messages
+      ws.on('pong', () => {
+        console.log(`Received pong from Deepgram for session ${sessionId}`);
       });
 
       ws.on('error', async (error) => {
@@ -265,6 +446,91 @@ function createDeepgramConnection(sessionId) {
       reject(error);
     }
   });
+}
+
+/**
+ * Buffer transcription and process after inactivity
+ * @param {string} text - Transcribed text
+ * @param {string} sessionId - Session ID
+ */
+function bufferTranscription(text, sessionId) {
+  // Get or create buffer for this session
+  let buffer = transcriptionBuffers.get(sessionId) || '';
+  const isFirstEntry = buffer === '';
+  
+  // Add a space if the buffer is not empty
+  if (!isFirstEntry) {
+    buffer += ' ';
+  }
+  
+  // Append text to buffer
+  buffer += text;
+  
+  // Update buffer
+  transcriptionBuffers.set(sessionId, buffer);
+  
+  // Clear existing timeout if there is one
+  if (transcriptionTimeouts.has(sessionId)) {
+    clearTimeout(transcriptionTimeouts.get(sessionId));
+  }
+  
+  // Set timeout to process text after inactivity
+  const timeout = setTimeout(() => {
+    processBufferedTranscription(sessionId);
+  }, TRANSCRIPTION_INACTIVITY_THRESHOLD);
+  
+  // Store the timeout
+  transcriptionTimeouts.set(sessionId, timeout);
+  
+  console.log(`Buffered transcription for session ${sessionId}, length now: ${buffer.length} chars`);
+}
+
+/**
+ * Process buffered transcription after inactivity timeout
+ * @param {string} sessionId - Session ID
+ */
+async function processBufferedTranscription(sessionId) {
+  try {
+    // Get the complete buffer
+    const fullText = transcriptionBuffers.get(sessionId);
+    
+    if (fullText && fullText.trim()) {
+      console.log(`Processing buffered transcription for session ${sessionId} after ${TRANSCRIPTION_INACTIVITY_THRESHOLD/1000}s inactivity`);
+      console.log(`Full text: "${fullText.substring(0, 100)}${fullText.length > 100 ? '...' : ''}"`);
+      
+      // Store in database
+      await storeTranscription(fullText, sessionId);
+      
+      // Send to stream endpoint
+      await sendTranscriptToStream(fullText, sessionId);
+    }
+    
+    // Clear the buffer
+    transcriptionBuffers.delete(sessionId);
+    
+  } catch (error) {
+    console.error(`Error processing buffered transcription for session ${sessionId}:`, error);
+  }
+  
+  // Clear the timeout
+  transcriptionTimeouts.delete(sessionId);
+}
+
+/**
+ * Store transcription in the database
+ * @param {string} text - Transcribed text
+ * @param {string} sessionId - Session ID
+ */
+async function storeTranscription(text, sessionId) {
+  try {
+    await transcriptionService.createTranscription({
+      text,
+      session_id: sessionId
+    });
+    console.log(`Stored transcription in database for session ${sessionId}`);
+  } catch (error) {
+    console.error('Error storing transcription:', error);
+  }
 }
 
 /**
@@ -308,18 +574,13 @@ function startHealthCheck() {
       if (inactiveTime > 5 * 60 * 1000) {
         console.log(`Closing stale connection for session ${sessionId} (inactive for ${Math.round(inactiveTime/1000)}s)`);
         
-        // Close and remove the connection
-        const ws = activeConnections.get(sessionId);
-        if (ws) {
-          try {
-            ws.terminate();
-          } catch (e) {
-            // Ignore errors when closing already closed connection
-          }
+        // Process any remaining buffered transcription
+        if (transcriptionBuffers.has(sessionId)) {
+          processBufferedTranscription(sessionId);
         }
         
-        activeConnections.delete(sessionId);
-        connectionStatus.delete(sessionId);
+        // Close the connection gracefully
+        closeConnection(sessionId);
         continue;
       }
       
@@ -347,18 +608,19 @@ function startHealthCheck() {
  * @param {string} sessionId - Session ID
  */
 function cleanupSession(sessionId) {
-  const ws = activeConnections.get(sessionId);
-  if (ws) {
-    try {
-      ws.terminate();
-    } catch (e) {
-      // Ignore errors when closing
-    }
-    
-    activeConnections.delete(sessionId);
-    connectionStatus.delete(sessionId);
-    console.log(`Cleaned up connection for session ${sessionId}`);
+  // Process any remaining buffered transcription
+  if (transcriptionBuffers.has(sessionId)) {
+    processBufferedTranscription(sessionId);
   }
+  
+  // Clear any pending transcription timeouts
+  if (transcriptionTimeouts.has(sessionId)) {
+    clearTimeout(transcriptionTimeouts.get(sessionId));
+    transcriptionTimeouts.delete(sessionId);
+  }
+  
+  // Clean up websocket and intervals
+  closeConnection(sessionId);
 }
 
 module.exports = {

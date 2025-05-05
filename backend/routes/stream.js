@@ -88,14 +88,17 @@ router.post('/', async (req, res) => {
       });
     }
 
-    console.log('Received text fragment:', text);
-    
+    console.log(`Received text for session ${sessionId}, length: ${text.length} characters`);
     
     // Get or create buffer for this session
     let buffer = streamBuffers.get(sessionId) || '';
     
-    // Append text fragment to buffer
-    buffer += ' ' + text.trim();
+    // Append text to buffer (with space if buffer not empty)
+    if (buffer.length > 0) {
+      buffer += ' ' + text.trim();
+    } else {
+      buffer += text.trim();
+    }
     
     // Update buffer in storage
     streamBuffers.set(sessionId, buffer);
@@ -114,6 +117,8 @@ router.post('/', async (req, res) => {
         const fullText = streamBuffers.get(sessionId);
         
         if (fullText && fullText.trim().length > 0) {
+          console.log(`Processing full text of ${fullText.length} characters for session ${sessionId}`);
+          
           // Process the accumulated text using the existing services
           const analysisResult = await llmService.analyzeText(fullText);
           
@@ -130,10 +135,10 @@ router.post('/', async (req, res) => {
           
           // Process memories
           if (analysisResult.memories && Array.isArray(analysisResult.memories) && analysisResult.memories.length > 0) {
-            await memoriesService.processMemories(analysisResult.memories);
+            await memoriesService.processMemories(analysisResult.memories, sessionId);
           } else {
             const memories = await llmService.extractMemories(fullText);
-            await memoriesService.processMemories(memories);
+            await memoriesService.processMemories(memories, sessionId);
           }
           
           // Clear the buffer
@@ -153,7 +158,7 @@ router.post('/', async (req, res) => {
     // Return success response
     res.json({
       success: true,
-      message: 'Text fragment received',
+      message: 'Text received',
       bufferedCharacters: buffer.length
     });
     
@@ -225,6 +230,7 @@ router.post('/process-now/:sessionId', async (req, res) => {
     
     // Get the buffer text
     const fullText = streamBuffers.get(sessionId);
+    console.log(`Processing full text of ${fullText.length} characters for session ${sessionId} (manual trigger)`);
     
     // Process the text
     const analysisResult = await llmService.analyzeText(fullText);
@@ -244,13 +250,13 @@ router.post('/process-now/:sessionId', async (req, res) => {
     // Process memories
     let memories = [];
     if (analysisResult.memories && Array.isArray(analysisResult.memories) && analysisResult.memories.length > 0) {
-      memories = await memoriesService.processMemories(analysisResult.memories);
+      memories = await memoriesService.processMemories(analysisResult.memories, sessionId);
     } else {
       const extractedMemories = await llmService.extractMemories(fullText);
-      memories = await memoriesService.processMemories(extractedMemories);
+      memories = await memoriesService.processMemories(extractedMemories, sessionId);
     }
     
-    // Clear the buffer
+    // Clear the buffer after processing
     streamBuffers.delete(sessionId);
     
     // Return the processed results
@@ -261,7 +267,8 @@ router.post('/process-now/:sessionId', async (req, res) => {
         brain: brainEntities,
         actionItems: actionItems,
         memories: memories
-      }
+      },
+      textLength: fullText.length
     });
     
   } catch (error) {
