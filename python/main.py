@@ -106,11 +106,11 @@ def is_audio_silent(audio_data):
         logger.error(f"Error checking audio energy: {e}")
         return False  # Assume not silent on error
 
-def send_audio_to_backend(audio_data):
+def send_audio_to_backend(audio_data, bypass_silence_check=False):
     """Send PCM audio data to the backend API with retry logic"""
     
-    # Skip if audio is silent or too small
-    if len(audio_data) < 100 or is_audio_silent(audio_data):
+    # Skip if audio is silent or too small (only if not bypassing silence check)
+    if not bypass_silence_check and (len(audio_data) < 100 or is_audio_silent(audio_data)):
         return True  # Pretend we sent it successfully
     
     try:
@@ -146,10 +146,11 @@ def data_handler(sender, data):
         pcm_data = decoder.decode_packet(data)
         if pcm_data:
             # Use buffer manager to send or buffer audio
+            # Always send Omi data, bypassing silence check
             if buffer_manager:
-                buffer_manager.send(pcm_data)
+                buffer_manager.send(pcm_data, True)
             else:
-                send_audio_to_backend(pcm_data)
+                send_audio_to_backend(pcm_data, True)
     else:
         # For microphone (already PCM data)
         # If data starts with the 3-byte Omi header we added in microphone.py, strip it

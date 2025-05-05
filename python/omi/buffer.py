@@ -45,16 +45,23 @@ class AudioBufferManager:
             self.retry_thread.join(timeout=2.0)
         logger.info(f"Audio buffer manager stopped, {self.buffer.qsize()} items still in buffer")
     
-    def send(self, audio_data):
+    def send(self, audio_data, bypass_silence_check=False):
         """
         Send audio data, buffering it if sending fails
+        
+        Args:
+            audio_data: Audio data to send
+            bypass_silence_check: Whether to bypass silence check for this data
         
         Returns:
             bool: True if sent successfully, False if buffered
         """
         # First try to send directly
         try:
-            success = self.send_func(audio_data)
+            if hasattr(self.send_func, '__code__') and 'bypass_silence_check' in self.send_func.__code__.co_varnames:
+                success = self.send_func(audio_data, bypass_silence_check)
+            else:
+                success = self.send_func(audio_data)
             if success:
                 return True
         except Exception as e:
@@ -63,7 +70,8 @@ class AudioBufferManager:
         # If sending failed, try to buffer it
         try:
             if self.buffer.qsize() < self.max_buffer_size:
-                self.buffer.put_nowait(audio_data)
+                # Store both the audio data and bypass flag
+                self.buffer.put_nowait((audio_data, bypass_silence_check))
                 logger.debug(f"Audio data buffered (buffer size: {self.buffer.qsize()})")
                 return False
             else:
@@ -71,7 +79,7 @@ class AudioBufferManager:
                 try:
                     # Try to get an item without blocking to make room
                     self.buffer.get_nowait()
-                    self.buffer.put_nowait(audio_data)
+                    self.buffer.put_nowait((audio_data, bypass_silence_check))
                     logger.warning("Buffer full - dropped oldest audio sample")
                     return False
                 except queue.Empty:
@@ -88,11 +96,22 @@ class AudioBufferManager:
             if not self.buffer.empty():
                 try:
                     # Get the next item to retry without removing it yet
-                    audio_data = self.buffer.queue[0]
+                    item = self.buffer.queue[0]
+                    
+                    # Handle both old format (just audio data) and new format (tuple with bypass flag)
+                    if isinstance(item, tuple) and len(item) == 2:
+                        audio_data, bypass_silence_check = item
+                    else:
+                        audio_data = item
+                        bypass_silence_check = False
                     
                     # Try to send it
                     try:
-                        success = self.send_func(audio_data)
+                        if hasattr(self.send_func, '__code__') and 'bypass_silence_check' in self.send_func.__code__.co_varnames:
+                            success = self.send_func(audio_data, bypass_silence_check)
+                        else:
+                            success = self.send_func(audio_data)
+                            
                         if success:
                             # If sending succeeded, remove it from the queue
                             self.buffer.get_nowait()
