@@ -4,11 +4,9 @@ backend/.env
 backend/package-lock.json
 python/.env
 .env
-/python/omi/__pycache__
+/python/venv
 prompt
-/python/omi/__pycache__
 venv/
-/python/omi/__pycache__
 /python/omi/__pycache__
 /BetterOmiApp
 /.expo

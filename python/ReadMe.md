@@ -14,28 +14,48 @@ This is the Python client component of the BetterOMI application, which captures
 
 - Python 3.7 or higher
 - Opus library (for audio decoding)
+- PortAudio library (for PyAudio functionality)
 - Backend server running (see main project README)
 
 ## Installation
 
-1. Install the Opus audio codec library:
+1. Install the required system libraries:
    ```
    # macOS
-   brew install opus
+   brew install opus portaudio
    
    # Ubuntu/Debian
-   sudo apt-get install libopus-dev
+   sudo apt-get install libopus-dev portaudio19-dev
    
    # Windows
-   # Download from https://opus-codec.org/downloads/
+   # Download Opus from https://opus-codec.org/downloads/
+   # Download PortAudio from http://www.portaudio.com/download.html
    ```
 
-2. Install Python dependencies:
+2. Create and activate a Python virtual environment:
+   ```
+   # Create virtual environment
+   python -m venv venv
+   
+   # Activate virtual environment
+   # On macOS/Linux
+   source venv/bin/activate
+   
+   # On Windows
+   venv\Scripts\activate
+   ```
+
+3. Install Python dependencies:
    ```
    pip install -r requirements.txt
    ```
+   
+   If you encounter issues with PyAudio or other packages, you can install the core dependencies separately:
+   ```
+   pip install requests bleak python-dotenv opuslib
+   ```
 
-3. Create a `.env` file in the project root with the following content:
+4. Create a `.env` file in the project root with the following content:
    ```
     BACKEND_URL=https://localhost:3000
    ```
@@ -45,7 +65,13 @@ This is the Python client component of the BetterOMI application, which captures
 
 Run the Python client:
 ```
-python python/main.py
+# Activate the virtual environment (if not already activated)
+source venv/bin/activate  # On macOS/Linux
+# or
+venv\Scripts\activate  # On Windows
+
+# Run the application
+python main.py
 ```
 
 
@@ -54,6 +80,7 @@ python python/main.py
 - **No Omi devices found**: Ensure your Omi device is powered on and in pairing mode
 - **Backend connection failed**: Ensure the backend server is running and accessible
 - **Audio issues**: Check that Opus is properly installed and that your microphone is working
+- **Missing modules error**: Make sure you're running the application within the activated virtual environment
 
 ## License
 
