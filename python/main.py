@@ -100,13 +100,46 @@ async def main():
     if not await check_backend_connection():
         return
     
-    # Find Omi device
-    omi_mac = await scan_for_omi_device(OMI_DEVICE_NAME)
-    if not omi_mac:
+    # Find Omi devices
+    omi_devices = await scan_for_omi_device(OMI_DEVICE_NAME)
+    
+    if not omi_devices:
         logger.error("No Omi devices found. Make sure your Omi is powered on and nearby.")
         return
-    
-    # Connect to Omi and listen for audio data
+
+    omi_mac = None
+    if len(omi_devices) == 1:
+        # If only one device is found, use it directly
+        omi_mac = omi_devices[0].address
+        logger.info(f"Using Omi device: {omi_devices[0].name} [{omi_mac}]")
+    else:
+        # If multiple devices are found, prompt the user to choose
+        print("Multiple Omi devices found:")
+        for i, device in enumerate(omi_devices):
+            print(f"  {i + 1}: {device.name} [{device.address}]")
+        
+        while omi_mac is None:
+            try:
+                choice = input(f"Enter the number of the device to connect to (1-{len(omi_devices)}): ")
+                choice_index = int(choice) - 1
+                if 0 <= choice_index < len(omi_devices):
+                    omi_mac = omi_devices[choice_index].address
+                    logger.info(f"Selected Omi device: {omi_devices[choice_index].name} [{omi_mac}]")
+                else:
+                    print("Invalid choice. Please enter a number from the list.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+            except EOFError: # Handle Ctrl+D or similar
+                logger.warning("Device selection cancelled.")
+                return
+
+    if not omi_mac:
+        # This case should ideally not be reached if selection logic is correct
+        # but added as a safeguard
+        logger.error("No Omi device selected or available.")
+        return
+
+    # Connect to the selected Omi and listen for audio data
     try:
         await listen_to_omi(omi_mac, OMI_AUDIO_CHARACTERISTIC_UUID, data_handler)
     except Exception as e:
