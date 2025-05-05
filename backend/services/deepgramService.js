@@ -55,6 +55,9 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 // Connection monitoring
 let healthCheckInterval = null;
 
+// Keep track of current speaker for each session
+const currentSpeakers = new Map();
+
 /**
  * Process audio data through Deepgram
  * @param {Buffer} audioData - PCM audio data
@@ -350,7 +353,8 @@ function createDeepgramConnection(sessionId) {
       // - model=nova-3 for best accuracy
       // - endpointing=500 to wait longer for continuation
       // - interim_results=true to get continuous results
-      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing=500&utterances=true&interim_results=true";
+      // - diarize=true to enable speaker detection
+      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing=500&utterances=true&interim_results=true&diarize=true";
       
       const ws = new WebSocket(url, {
         headers: {
@@ -385,14 +389,24 @@ function createDeepgramConnection(sessionId) {
             const transcript = response.channel.alternatives[0].transcript || "";
             const is_final = response.is_final || false;
             
+            // Get speaker information if available
+            let speaker = null;
+            if (response.channel.alternatives[0].words && response.channel.alternatives[0].words.length > 0) {
+              const words = response.channel.alternatives[0].words;
+              // Use the speaker from the first word
+              if (words[0].speaker !== undefined) {
+                speaker = words[0].speaker;
+              }
+            }
+            
             if (transcript && transcript.trim()) {
               const cleanTranscript = transcript.trim();
-              console.log(`\nTranscript for session ${sessionId} ${is_final ? '(FINAL)' : '(INTERIM)'}:`, cleanTranscript);
+              console.log(`\nTranscript for session ${sessionId} ${is_final ? '(FINAL)' : '(INTERIM)'} - Speaker ${speaker !== null ? speaker : 'unknown'}:`, cleanTranscript);
               
               // Only process final transcripts
               if (is_final) {
-                // Add to buffer or create new one
-                bufferTranscription(cleanTranscript, sessionId);
+                // Add to buffer or create new one with speaker info
+                bufferTranscription(cleanTranscript, sessionId, speaker);
               }
               
               // Update last active timestamp
@@ -452,15 +466,30 @@ function createDeepgramConnection(sessionId) {
  * Buffer transcription and process after inactivity
  * @param {string} text - Transcribed text
  * @param {string} sessionId - Session ID
+ * @param {number|null} speaker - Speaker number
  */
-function bufferTranscription(text, sessionId) {
+function bufferTranscription(text, sessionId, speaker = null) {
   // Get or create buffer for this session
   let buffer = transcriptionBuffers.get(sessionId) || '';
   const isFirstEntry = buffer === '';
   
-  // Add a space if the buffer is not empty
-  if (!isFirstEntry) {
+  // Get current speaker for this session
+  const currentSpeaker = currentSpeakers.get(sessionId);
+  
+  // Check if this is a new speaker
+  const isNewSpeaker = (speaker !== null && currentSpeaker !== speaker && !isFirstEntry);
+  
+  // If new speaker, add a line break
+  if (isNewSpeaker) {
+    buffer += '\n\n';
+  } else if (!isFirstEntry) {
+    // Add a space for the same speaker
     buffer += ' ';
+  }
+  
+  // If this is a new speaker and not the first entry, add a speaker prefix
+  if (speaker !== null && (isNewSpeaker || isFirstEntry)) {
+    buffer += `Speaker ${speaker}: `;
   }
   
   // Append text to buffer
@@ -468,6 +497,11 @@ function bufferTranscription(text, sessionId) {
   
   // Update buffer
   transcriptionBuffers.set(sessionId, buffer);
+  
+  // Update current speaker
+  if (speaker !== null) {
+    currentSpeakers.set(sessionId, speaker);
+  }
   
   // Process immediately instead of waiting
   processBufferedTranscription(sessionId);
@@ -596,23 +630,53 @@ function startHealthCheck() {
 }
 
 /**
- * Clean up connections for a specific session
+ * Clean up all resources for a session
  * @param {string} sessionId - Session ID
  */
 function cleanupSession(sessionId) {
-  // Process any remaining buffered transcription
-  if (transcriptionBuffers.has(sessionId)) {
-    processBufferedTranscription(sessionId);
+  console.log(`Cleaning up session resources for ${sessionId}`);
+  
+  // Clear WebSocket connection
+  if (activeConnections.has(sessionId)) {
+    const ws = activeConnections.get(sessionId);
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    } catch (e) {
+      console.error(`Error closing WebSocket for session ${sessionId}:`, e);
+    }
+    activeConnections.delete(sessionId);
   }
   
-  // Clear any pending transcription timeouts
+  // Clear status
+  connectionStatus.delete(sessionId);
+  
+  // Clear transcription buffer
+  transcriptionBuffers.delete(sessionId);
+  
+  // Clear timeouts
   if (transcriptionTimeouts.has(sessionId)) {
     clearTimeout(transcriptionTimeouts.get(sessionId));
     transcriptionTimeouts.delete(sessionId);
   }
   
-  // Clean up websocket and intervals
-  closeConnection(sessionId);
+  // Clear keep-alive interval
+  if (keepAliveIntervals.has(sessionId)) {
+    clearInterval(keepAliveIntervals.get(sessionId));
+    keepAliveIntervals.delete(sessionId);
+  }
+  
+  // Clear auto-close timeout
+  if (autoCloseTimeouts.has(sessionId)) {
+    clearTimeout(autoCloseTimeouts.get(sessionId));
+    autoCloseTimeouts.delete(sessionId);
+  }
+  
+  // Clear speaker tracking
+  currentSpeakers.delete(sessionId);
+  
+  console.log(`Cleaned up session ${sessionId}`);
 }
 
 module.exports = {
