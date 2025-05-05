@@ -7,3 +7,4 @@ python/.env
 /python/omi/__pycache__
 prompt
 /python/omi/__pycache__
+venv/

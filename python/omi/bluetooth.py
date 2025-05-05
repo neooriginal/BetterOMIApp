@@ -58,7 +58,7 @@ async def listen_to_omi(mac_address, char_uuid, data_handler):
             raise
 
 async def scan_for_omi_device(device_name="Omi"):
-    """Scan for available Omi devices and return the first one found"""
+    """Scan for available Omi devices and return a list of found devices"""
     logger.info(f"Scanning for {device_name} devices...")
     
     # Try up to 3 times to find the device
@@ -68,7 +68,8 @@ async def scan_for_omi_device(device_name="Omi"):
         
         if omi_devices:
             logger.info(f"Found {len(omi_devices)} {device_name} device(s)")
-            return omi_devices[0].address
+            # Return the list of BleakDevice objects
+            return omi_devices
         
         if attempt < 2:  # Don't log after last attempt
             logger.info(f"No {device_name} devices found, retrying scan...")
