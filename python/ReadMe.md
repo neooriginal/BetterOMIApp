@@ -81,6 +81,10 @@ python main.py
 - **Backend connection failed**: Ensure the backend server is running and accessible
 - **Audio issues**: Check that Opus is properly installed and that your microphone is working
 - **Missing modules error**: Make sure you're running the application within the activated virtual environment
+- **PyAudio installation fails**: 
+  - Ensure PortAudio is installed properly (see Installation step 1)
+  - On macOS, you may need to install pyaudio with: `pip install --global-option=build_ext --global-option="-I/opt/homebrew/include" --global-option="-L/opt/homebrew/lib" pyaudio`
+  - Consider using a pre-built PyAudio binary if installation continues to fail
 
 ## License
 
