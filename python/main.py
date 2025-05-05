@@ -4,12 +4,20 @@ import sys
 import uuid
 import base64
 import requests
+import logging
+import time
+from requests.adapters import HTTPAdapter, Retry
+from urllib3.util.timeout import Timeout
 from asyncio import Queue
 from bleak import BleakScanner
 from dotenv import load_dotenv
 
-from omi.bluetooth import listen_to_omi
+from omi.bluetooth import listen_to_omi, scan_for_omi_device
 from omi.decoder import OmiOpusDecoder
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,25 +34,22 @@ SESSION_ID = str(uuid.uuid4())  # Generate a unique session ID
 # Initialize decoder
 decoder = OmiOpusDecoder()
 
-async def find_omi_device():
-    """Find the Omi device by scanning for devices with name 'Omi'"""
-    print("Scanning for Omi devices...")
-    devices = await BleakScanner.discover()
-    omi_devices = [d for d in devices if d.name and OMI_DEVICE_NAME in d.name]
-    
-    if not omi_devices:
-        print("No Omi devices found. Make sure your Omi is powered on and nearby.")
-        return None
-    
-    print(f"Found {len(omi_devices)} Omi device(s):")
-    for i, device in enumerate(omi_devices):
-        print(f"  {i+1}. {device.name} [{device.address}]")
-    
-    # Return the first Omi device found
-    return omi_devices[0].address
+# Create a session with retry logic
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"]
+)
+# Request timeouts: (connect, read)
+timeout = Timeout(connect=5.0, read=30.0)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
 
 def send_audio_to_backend(audio_data):
-    """Send PCM audio data to the backend API"""
+    """Send PCM audio data to the backend API with retry logic"""
     try:
         # Base64 encode the binary audio data
         encoded_audio = base64.b64encode(audio_data).decode('utf-8')
@@ -54,11 +59,15 @@ def send_audio_to_backend(audio_data):
             "sessionId": SESSION_ID
         }
         
-        response = requests.post(AUDIO_STREAM_ENDPOINT, json=payload)
+        response = session.post(AUDIO_STREAM_ENDPOINT, json=payload, timeout=timeout)
         if response.status_code != 200:
-            print(f"Error sending audio to backend: {response.status_code}")
+            logger.warning(f"Error sending audio to backend: {response.status_code}")
+    except requests.exceptions.Timeout:
+        logger.error("Timeout when connecting to backend")
+    except requests.exceptions.ConnectionError:
+        logger.error("Connection error when sending audio to backend")
     except Exception as e:
-        print(f"Error connecting to backend: {e}")
+        logger.error(f"Error connecting to backend: {e}")
 
 def data_handler(sender, data):
     """Handle incoming data from Omi device"""
@@ -68,31 +77,44 @@ def data_handler(sender, data):
         # Send decoded audio to backend
         send_audio_to_backend(pcm_data)
 
+async def check_backend_connection():
+    """Check if backend server is reachable"""
+    for attempt in range(3):
+        try:
+            response = session.get(f"{BACKEND_URL}/", timeout=Timeout(connect=3.0, read=5.0))
+            logger.info(f"Connected to backend at {BACKEND_URL}")
+            logger.info(f"Session ID: {SESSION_ID}")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Attempt {attempt+1}/3: Error connecting to backend: {e}")
+            if attempt < 2:
+                logger.info(f"Retrying backend connection in 2 seconds...")
+                await asyncio.sleep(2)
+    
+    logger.error(f"Failed to connect to backend at {BACKEND_URL}")
+    logger.error(f"Make sure the backend server is running at {BACKEND_URL}")
+    return False
+
 async def main():
     # Check for backend connection
-    try:
-        response = requests.get(f"{BACKEND_URL}/")
-        print(f"Connected to backend at {BACKEND_URL}")
-        print(f"Session ID: {SESSION_ID}")
-    except Exception as e:
-        print(f"Error connecting to backend: {e}")
-        print(f"Make sure the backend server is running at {BACKEND_URL}")
+    if not await check_backend_connection():
         return
     
     # Find Omi device
-    omi_mac = await find_omi_device()
+    omi_mac = await scan_for_omi_device(OMI_DEVICE_NAME)
     if not omi_mac:
+        logger.error("No Omi devices found. Make sure your Omi is powered on and nearby.")
         return
     
     # Connect to Omi and listen for audio data
     try:
         await listen_to_omi(omi_mac, OMI_AUDIO_CHARACTERISTIC_UUID, data_handler)
     except Exception as e:
-        print(f"Error connecting to Omi: {e}")
+        logger.error(f"Error in Omi connection: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logger.info("\nExiting gracefully...")
         sys.exit(0)
