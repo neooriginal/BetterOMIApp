@@ -11,9 +11,12 @@ from urllib3.util.timeout import Timeout
 from asyncio import Queue
 from bleak import BleakScanner
 from dotenv import load_dotenv
+import urllib3
 
 from omi.bluetooth import listen_to_omi, scan_for_omi_device
 from omi.decoder import OmiOpusDecoder
+from omi.microphone import MicrophoneAudioSource
+from omi.buffer import AudioBufferManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -47,6 +50,16 @@ timeout = Timeout(connect=5.0, read=30.0)
 adapter = HTTPAdapter(max_retries=retry_strategy)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
+# Disable SSL verification for self-signed certificates
+session.verify = False
+# Suppress InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Global microphone source
+mic_source = None
+
+# Initialize buffer manager
+buffer_manager = None
 
 def send_audio_to_backend(audio_data):
     """Send PCM audio data to the backend API with retry logic"""
@@ -60,22 +73,39 @@ def send_audio_to_backend(audio_data):
         }
         
         response = session.post(AUDIO_STREAM_ENDPOINT, json=payload, timeout=timeout)
-        if response.status_code != 200:
+        if response.status_code == 200:
+            return True
+        else:
             logger.warning(f"Error sending audio to backend: {response.status_code}")
+            return False
     except requests.exceptions.Timeout:
         logger.error("Timeout when connecting to backend")
+        return False
     except requests.exceptions.ConnectionError:
         logger.error("Connection error when sending audio to backend")
+        return False
     except Exception as e:
         logger.error(f"Error connecting to backend: {e}")
+        return False
 
 def data_handler(sender, data):
-    """Handle incoming data from Omi device"""
-    # Decode the Opus audio
-    pcm_data = decoder.decode_packet(data)
-    if pcm_data:
-        # Send decoded audio to backend
-        send_audio_to_backend(pcm_data)
+    """Handle incoming data from Omi device or microphone"""
+    # For Omi device (Opus encoded data)
+    if sender != "microphone":
+        # Decode the Opus audio
+        pcm_data = decoder.decode_packet(data)
+        if pcm_data:
+            # Use buffer manager to send or buffer audio
+            if buffer_manager:
+                buffer_manager.send(pcm_data)
+            else:
+                send_audio_to_backend(pcm_data)
+    else:
+        # For microphone (already PCM data)
+        if buffer_manager:
+            buffer_manager.send(data)
+        else:
+            send_audio_to_backend(data)
 
 async def check_backend_connection():
     """Check if backend server is reachable"""
@@ -95,16 +125,86 @@ async def check_backend_connection():
     logger.error(f"Make sure the backend server is running at {BACKEND_URL}")
     return False
 
+def start_microphone_fallback():
+    """Start using computer microphone as audio source"""
+    global mic_source
+    
+    logger.info("Initializing computer microphone as fallback audio source")
+    mic_source = MicrophoneAudioSource()
+    success = mic_source.start(lambda _, data: data_handler("microphone", data))
+    
+    if success:
+        logger.info("Using computer microphone for audio input")
+        return True
+    else:
+        logger.error("Failed to initialize computer microphone")
+        return False
+
 async def main():
+    global buffer_manager
+    
     # Check for backend connection
     if not await check_backend_connection():
         return
     
+    # Initialize buffer manager
+    buffer_manager = AudioBufferManager(send_audio_to_backend)
+    buffer_manager.start()
+    
     # Find Omi devices
-    omi_devices = await scan_for_omi_device(OMI_DEVICE_NAME)
+    try:
+        omi_devices = await scan_for_omi_device(OMI_DEVICE_NAME)
+    except Exception as e:
+        if "Bluetooth device is turned off" in str(e):
+            logger.error("Bluetooth is turned off. Please turn on Bluetooth to use Omi device.")
+            choice = input("Would you like to turn on Bluetooth and retry (r) or continue with microphone (m)? [r/m]: ")
+            if choice.lower() == 'r':
+                logger.info("Please turn on Bluetooth and run the program again.")
+                return
+            elif choice.lower() == 'm':
+                logger.info("Continuing with microphone input...")
+                if start_microphone_fallback():
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                    except KeyboardInterrupt:
+                        logger.info("\nExiting microphone capture...")
+                        if mic_source:
+                            mic_source.stop()
+                        if buffer_manager:
+                            buffer_manager.stop()
+                return
+            else:
+                logger.info("Invalid choice. Exiting...")
+                return
+        else:
+            logger.error(f"Error scanning for Omi devices: {e}")
+            logger.info("Falling back to computer microphone.")
+            if start_microphone_fallback():
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except KeyboardInterrupt:
+                    logger.info("\nExiting microphone capture...")
+                    if mic_source:
+                        mic_source.stop()
+                    if buffer_manager:
+                        buffer_manager.stop()
+            return
     
     if not omi_devices:
-        logger.error("No Omi devices found. Make sure your Omi is powered on and nearby.")
+        logger.warning("No Omi devices found. Falling back to computer microphone.")
+        if start_microphone_fallback():
+            # Keep the main thread running while microphone captures
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\nExiting microphone capture...")
+                if mic_source:
+                    mic_source.stop()
+                if buffer_manager:
+                    buffer_manager.stop()
         return
 
     omi_mac = None
@@ -137,6 +237,18 @@ async def main():
         # This case should ideally not be reached if selection logic is correct
         # but added as a safeguard
         logger.error("No Omi device selected or available.")
+        # Try microphone fallback
+        if start_microphone_fallback():
+            # Keep the main thread running while microphone captures
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\nExiting microphone capture...")
+                if mic_source:
+                    mic_source.stop()
+                if buffer_manager:
+                    buffer_manager.stop()
         return
 
     # Connect to the selected Omi and listen for audio data
@@ -144,10 +256,27 @@ async def main():
         await listen_to_omi(omi_mac, OMI_AUDIO_CHARACTERISTIC_UUID, data_handler)
     except Exception as e:
         logger.error(f"Error in Omi connection: {e}")
+        logger.info("Trying microphone fallback after Omi connection failure")
+        if start_microphone_fallback():
+            # Keep the main thread running while microphone captures
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\nExiting microphone capture...")
+                if mic_source:
+                    mic_source.stop()
+                if buffer_manager:
+                    buffer_manager.stop()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("\nExiting gracefully...")
+        # Clean up resources
+        if mic_source:
+            mic_source.stop()
+        if buffer_manager:
+            buffer_manager.stop()
         sys.exit(0)
