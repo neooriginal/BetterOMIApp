@@ -2,30 +2,39 @@ const { run, get, all } = require('../models/database');
 
 /**
  * Create a new transcription
- * @param {Object} transcription - Transcription details
+ * @param {string} text - Transcription text
+ * @param {string} session_id - Session ID
+ * @param {number} expirationDays - Number of days until expiration (default: 14)
+ * @param {number|null} memory_id - Associated memory ID (optional)
  * @returns {Promise<Object>} - The created transcription
  */
-async function createTranscription(transcription) {
+async function createTranscription(text, session_id, expirationDays = 14, memory_id = null) {
   try {
-    const { text, session_id, memory_id = null } = transcription;
+    if (!text || text.trim() === '') {
+      throw new Error('Transcription text cannot be empty');
+    }
     
-    // Calculate expiration date (14 days from now)
+    // Calculate expiration date
     const expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + 14);
+    expirationDate.setDate(expirationDate.getDate() + expirationDays);
     const expires_at = expirationDate.toISOString();
     
+    const created_at = new Date().toISOString();
+    
+    console.log(`Creating transcription: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}" for session ${session_id}`);
+    
     const result = await run(
-      'INSERT INTO transcriptions (text, session_id, memory_id, expires_at) VALUES (?, ?, ?, ?)',
-      [text, session_id, memory_id, expires_at]
+      'INSERT INTO transcriptions (text, session_id, memory_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
+      [text, session_id, memory_id, created_at, expires_at]
     );
     
     return {
-      id: result.id,
+      id: result.lastID,
       text,
       session_id,
       memory_id,
-      expires_at,
-      created_at: new Date().toISOString()
+      created_at,
+      expires_at
     };
   } catch (error) {
     console.error('Error creating transcription:', error);

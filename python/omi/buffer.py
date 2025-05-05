@@ -7,7 +7,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class AudioBufferManager:
-    def __init__(self, send_func, max_buffer_size=100, retry_interval=1.0):
+    def __init__(self, send_func, max_buffer_size=1000, retry_interval=0.1):
         """
         Initialize the buffering system for audio data
         

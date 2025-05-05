@@ -469,67 +469,59 @@ function bufferTranscription(text, sessionId) {
   // Update buffer
   transcriptionBuffers.set(sessionId, buffer);
   
-  // Clear existing timeout if there is one
-  if (transcriptionTimeouts.has(sessionId)) {
-    clearTimeout(transcriptionTimeouts.get(sessionId));
-  }
+  // Process immediately instead of waiting
+  processBufferedTranscription(sessionId);
   
-  // Set timeout to process text after inactivity
-  const timeout = setTimeout(() => {
-    processBufferedTranscription(sessionId);
-  }, TRANSCRIPTION_INACTIVITY_THRESHOLD);
-  
-  // Store the timeout
-  transcriptionTimeouts.set(sessionId, timeout);
-  
-  console.log(`Buffered transcription for session ${sessionId}, length now: ${buffer.length} chars`);
+  console.log(`Processed transcription immediately for session ${sessionId}: "${text}"`);
 }
 
 /**
- * Process buffered transcription after inactivity timeout
+ * Process buffered transcription after inactivity
  * @param {string} sessionId - Session ID
  */
 async function processBufferedTranscription(sessionId) {
-  try {
-    // Get the complete buffer
-    const fullText = transcriptionBuffers.get(sessionId);
-    
-    if (fullText && fullText.trim()) {
-      console.log(`Processing buffered transcription for session ${sessionId} after ${TRANSCRIPTION_INACTIVITY_THRESHOLD/1000}s inactivity`);
-      console.log(`Full text: "${fullText.substring(0, 100)}${fullText.length > 100 ? '...' : ''}"`);
-      
-      // Store in database
-      await storeTranscription(fullText, sessionId);
-      
-      // Send to stream endpoint
-      await sendTranscriptToStream(fullText, sessionId);
-    }
-    
-    // Clear the buffer
-    transcriptionBuffers.delete(sessionId);
-    
-  } catch (error) {
-    console.error(`Error processing buffered transcription for session ${sessionId}:`, error);
+  // Get buffered transcription
+  const buffer = transcriptionBuffers.get(sessionId);
+  
+  // Skip if buffer is empty
+  if (!buffer || buffer.trim() === '') {
+    return;
   }
   
-  // Clear the timeout
-  transcriptionTimeouts.delete(sessionId);
+  console.log(`Processing buffered transcription for session ${sessionId}: "${buffer}"`);
+  
+  try {
+    // Store in database
+    await storeTranscription(buffer, sessionId);
+    
+    // Send to stream processor
+    await sendTranscriptToStream(buffer, sessionId);
+    
+    // Clear buffer
+    transcriptionBuffers.delete(sessionId);
+    
+    console.log(`Successfully processed transcription for session ${sessionId}`);
+  } catch (error) {
+    console.error(`Error processing transcription for session ${sessionId}:`, error);
+  }
 }
 
 /**
- * Store transcription in the database
- * @param {string} text - Transcribed text
+ * Store transcription in database
+ * @param {string} text - Transcription text
  * @param {string} sessionId - Session ID
  */
 async function storeTranscription(text, sessionId) {
   try {
-    await transcriptionService.createTranscription({
-      text,
-      session_id: sessionId
-    });
-    console.log(`Stored transcription in database for session ${sessionId}`);
+    // Create transcription record with 30-day expiration
+    const expirationDays = 30;
+    const transcription = await transcriptionService.createTranscription(text, sessionId, expirationDays);
+    
+    console.log(`Saved transcription to database with ID: ${transcription.id}`);
+    return transcription;
   } catch (error) {
     console.error('Error storing transcription:', error);
+    throw error;
   }
 }
 
