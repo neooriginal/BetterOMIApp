@@ -90,6 +90,7 @@ router.get('/summary', async (req, res) => {
     const people = await brainService.getBrainNodesByType('person');
     const locations = await brainService.getBrainNodesByType('location');
     const events = await brainService.getBrainNodesByType('event');
+    const activities = await brainService.getCurrentActivities();
     
     // Get action items
     const pendingActionItems = await actionItemsService.getActionItems({
@@ -113,13 +114,15 @@ router.get('/summary', async (req, res) => {
           people: people.length,
           locations: locations.length,
           events: events.length,
+          currentActivities: activities.length,
           pendingActionItems: pendingActionItems.length,
           importantMemories: importantMemories.length
         },
         brainData: {
           recentPeople: people.slice(0, 5),
           recentLocations: locations.slice(0, 5),
-          recentEvents: events.slice(0, 5)
+          recentEvents: events.slice(0, 5),
+          currentActivities: activities
         },
         topActionItems: pendingActionItems.slice(0, 5),
         topMemories: importantMemories.slice(0, 5)
@@ -131,6 +134,29 @@ router.get('/summary', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error getting summary',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * API endpoint to get current activities
+ */
+router.get('/current-activities', async (req, res) => {
+  try {
+    const activities = await brainService.getCurrentActivities();
+    
+    // Return current activities data
+    res.json({
+      success: true,
+      activities: activities
+    });
+    
+  } catch (error) {
+    console.error('Error getting current activities:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting current activities',
       error: error.message
     });
   }

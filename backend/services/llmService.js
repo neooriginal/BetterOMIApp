@@ -24,8 +24,9 @@ async function analyzeText(text) {
           1. People mentioned (names, roles)
           2. Locations mentioned
           3. Events mentioned (with dates if available)
-          4. Action items/tasks that need to be done (IMPORTANT: Be thorough in identifying anything that could be considered a task or action)
-          5. Relationships between entities (IMPORTANT: Identify how entities are connected to each other)
+          4. Current activities or states (what the person is doing/experiencing right now)
+          5. Action items/tasks that need to be done (IMPORTANT: Be thorough in identifying anything that could be considered a task or action)
+          6. Relationships between entities (IMPORTANT: Identify how entities are connected to each other)
           
           For each entity, provide:
           - Name (required)
@@ -34,12 +35,30 @@ async function analyzeText(text) {
           - If temporary, suggest an expiration time in days or a specific date (field "expirationDays" or "expirationDate")
           - Additional relevant details specific to the entity type
           
+          IMPORTANT: For current activities (what someone is doing right now), ALWAYS:
+          - Create a special "activity" event
+          - Mark it as temporary with a short expiration time (typically 2-6 hours)
+          - Set proper importance based on the nature of the activity
+          - Include detailed context to make it useful for recall later
+          - Connect it to relevant people, locations, and other entities
+          
+          Examples of current activities to identify:
+          - Eating (what food, where, with whom)
+          - Working on specific tasks
+          - Meeting with people
+          - Traveling or commuting
+          - Experiencing specific emotions or states
+          - Reading, watching, or consuming content
+          - Current location or physical context
+          
           IMPORTANT: Carefully decide whether each entity should be permanent or temporary based on its significance:
           - Mark as permanent (temporary = false): key people, important locations, major events that have long-term significance
           - Mark as temporary (temporary = true): minor contacts, transient locations, one-time events with limited relevance
+          - ALWAYS mark current activities as temporary with appropriate short-term expiration
           
           For temporary entities, provide a specific expirationDays value:
-          - Short-term (7-14 days): Minor details with immediate relevance only
+          - Very short-term (0.1-0.3 days / 2-6 hours): Current activities, immediate contexts, passing states
+          - Short-term (1-7 days): Minor details with immediate relevance only
           - Medium-term (30-60 days): Information with extended but not long-term relevance
           - Long-term (90-365 days): More significant information that's relevant for months
           - Or provide a specific date in "YYYY-MM-DD" format in the field "expirationDate"
@@ -55,7 +74,7 @@ async function analyzeText(text) {
               {"name": "Location Name", "details": "Location details", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
             ],
             "events": [
-              {"name": "Event Name", "date": "Event date if known", "description": "Event description", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD", "people": ["Person1", "Person2"], "location": "Location Name"}
+              {"name": "Event Name", "date": "Event date if known", "description": "Event description", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD", "people": ["Person1", "Person2"], "location": "Location Name", "type": "regular/activity"}
             ],
             "relationships": [
               {"from": "Entity1 Name", "to": "Entity2 Name", "type": "relationship type", "description": "relationship description", "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
@@ -68,11 +87,11 @@ async function analyzeText(text) {
             ]
           }
           
-          Relationship types could include: "knows", "works_with", "reports_to", "located_at", "participated_in", "organized", etc.
+          Relationship types could include: "knows", "works_with", "reports_to", "located_at", "participated_in", "organized", "is_doing", etc.
           
           Always include at least one entity in each category and identify relationships between entities, even if you have to infer from context. If truly none are mentioned, create a placeholder with "Unknown" as the name.
           
-          IMPORTANT: Be sure to identify key relationships between entities (especially people-to-people and people-to-events relationships).
+          IMPORTANT: Be EXTREMELY thorough in identifying current activities and states. Any mention of what someone is currently doing should be captured as a temporary event with appropriate short-term expiration.
           `
         },
         {

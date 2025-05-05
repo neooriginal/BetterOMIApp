@@ -125,11 +125,14 @@ function calculateExpirationDate(expiryInfo) {
       }
     }
     
-    // Otherwise treat as number of days
-    const days = parseInt(expiryInfo);
+    // Otherwise treat as number of days (supports fractional days for hours)
+    const days = parseFloat(expiryInfo);
     if (!isNaN(days)) {
       const date = new Date();
-      date.setDate(date.getDate() + days);
+      // Calculate hours for fractional days
+      const hours = days * 24;
+      // Add the specified number of hours
+      date.setTime(date.getTime() + (hours * 60 * 60 * 1000));
       return date.toISOString();
     }
     
@@ -240,40 +243,53 @@ async function processEntities(analysisResult) {
           } else if (event.expirationDays) {
             expiresAt = calculateExpirationDate(event.expirationDays);
           } else {
-            // Default to 30 days if temporary but no specific expiration
-            expiresAt = calculateExpirationDate(30);
+            // For activity type events, default to 0.25 days (6 hours) if no expiration specified
+            if (event.type === 'activity') {
+              expiresAt = calculateExpirationDate(0.25); // 6 hours
+            } else {
+              // Default to 30 days for regular events if temporary but no specific expiration
+              expiresAt = calculateExpirationDate(30);
+            }
           }
         }
         
-        console.log(`Creating event: ${event.name} (${event.temporary ? 'Temporary' : 'Permanent'}${expiresAt ? ', expires: ' + expiresAt.split('T')[0] : ''})`);
+        // Determine event type and add appropriate logging
+        const eventType = event.type === 'activity' ? 'activity' : 'event';
+        console.log(`Creating ${eventType}: ${event.name} (${event.temporary ? 'Temporary' : 'Permanent'}${expiresAt ? ', expires: ' + expiresAt.split('T')[0] + ' ' + new Date(expiresAt).toLocaleTimeString() : ''})`);
         
-        const eventNode = await createBrainNode('event', event.name, {
+        const eventNode = await createBrainNode(eventType, event.name, {
           importance: event.importance || 1,
           expires_at: expiresAt,
-          data: { 
+          data: {
+            description: event.description,
             date: event.date,
-            description: event.description
+            people: event.people,
+            location: event.location,
+            type: event.type || 'regular'
           }
         });
         
         results.events.push(eventNode);
         
-        // Create relationships between events and people if applicable
+        // Create relationships between event and mentioned people
         if (event.people && Array.isArray(event.people)) {
           for (const personName of event.people) {
-            const person = results.people.find(p => p.name === personName);
-            if (person) {
-              const relationship = await createRelationship(person.id, eventNode.id, 'participated_in');
+            // Find the person node
+            const personNode = results.people.find(p => p.name === personName);
+            if (personNode) {
+              // Create relationship
+              const relationshipType = event.type === 'activity' ? 'is_doing' : 'participated_in';
+              const relationship = await createRelationship(personNode.id, eventNode.id, relationshipType);
               results.relationships.push(relationship);
             }
           }
         }
         
-        // Create relationships between events and locations if applicable
+        // Create relationship between event and location
         if (event.location) {
-          const location = results.locations.find(l => l.name === event.location);
-          if (location) {
-            const relationship = await createRelationship(eventNode.id, location.id, 'happened_at');
+          const locationNode = results.locations.find(l => l.name === event.location);
+          if (locationNode) {
+            const relationship = await createRelationship(eventNode.id, locationNode.id, 'located_at');
             results.relationships.push(relationship);
           }
         }
@@ -344,44 +360,112 @@ async function processEntities(analysisResult) {
 /**
  * Get all brain nodes of a specific type
  * @param {string} type - Type of nodes to retrieve
- * @returns {Promise<Array>} - List of brain nodes
+ * @returns {Promise<Array>} - Array of nodes
  */
 async function getBrainNodesByType(type) {
   try {
-    return await all('SELECT * FROM brain_nodes WHERE type = ? ORDER BY importance DESC', [type]);
+    // Add filtering for non-expired nodes
+    const currentDate = new Date().toISOString();
+    const nodes = await all(
+      'SELECT * FROM brain_nodes WHERE type = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC',
+      [type, currentDate]
+    );
+    
+    return nodes.map(node => ({
+      ...node,
+      data: node.data ? JSON.parse(node.data) : null
+    }));
   } catch (error) {
-    console.error(`Error retrieving ${type} nodes:`, error);
+    console.error(`Error getting brain nodes of type ${type}:`, error);
     throw error;
   }
 }
 
 /**
- * Get a specific brain node by ID
+ * Get current activities (nodes of type 'activity')
+ * @returns {Promise<Array>} - Array of activity nodes
+ */
+async function getCurrentActivities() {
+  try {
+    // Get activities that haven't expired yet
+    const currentDate = new Date().toISOString();
+    const nodes = await all(
+      'SELECT * FROM brain_nodes WHERE type = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC',
+      ['activity', currentDate]
+    );
+    
+    return nodes.map(node => ({
+      ...node,
+      data: node.data ? JSON.parse(node.data) : null
+    }));
+  } catch (error) {
+    console.error('Error getting current activities:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a brain node by ID
  * @param {number} id - ID of the node to retrieve
- * @returns {Promise<Object>} - The brain node
+ * @returns {Promise<Object>} - The node
  */
 async function getBrainNodeById(id) {
   try {
-    return await get('SELECT * FROM brain_nodes WHERE id = ?', [id]);
+    const node = await get('SELECT * FROM brain_nodes WHERE id = ?', [id]);
+    
+    if (!node) {
+      return null;
+    }
+    
+    return {
+      ...node,
+      data: node.data ? JSON.parse(node.data) : null
+    };
   } catch (error) {
-    console.error('Error retrieving brain node:', error);
+    console.error(`Error getting brain node with ID ${id}:`, error);
     throw error;
   }
 }
 
 /**
- * Search for brain nodes by name
- * @param {string} searchTerm - Search term
- * @returns {Promise<Array>} - List of matching brain nodes
+ * Search brain nodes by name or content
+ * @param {string} searchTerm - Term to search for
+ * @returns {Promise<Array>} - Array of matching nodes
  */
 async function searchBrainNodes(searchTerm) {
   try {
-    return await all(
-      'SELECT * FROM brain_nodes WHERE name LIKE ? ORDER BY importance DESC', 
-      [`%${searchTerm}%`]
+    // Add filtering for non-expired nodes
+    const currentDate = new Date().toISOString();
+    const searchPattern = `%${searchTerm}%`;
+    
+    // Search in node name
+    const nameResults = await all(
+      'SELECT * FROM brain_nodes WHERE name LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY type, created_at DESC LIMIT 50',
+      [searchPattern, currentDate]
     );
+    
+    // Search in node data (requires handling different types of data)
+    const dataResults = await all(
+      'SELECT * FROM brain_nodes WHERE data LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY type, created_at DESC LIMIT 50',
+      [searchPattern, currentDate]
+    );
+    
+    // Combine results and remove duplicates
+    const combinedResults = [...nameResults];
+    
+    for (const dataNode of dataResults) {
+      if (!combinedResults.some(node => node.id === dataNode.id)) {
+        combinedResults.push(dataNode);
+      }
+    }
+    
+    // Parse data for each node
+    return combinedResults.map(node => ({
+      ...node,
+      data: node.data ? JSON.parse(node.data) : null
+    }));
   } catch (error) {
-    console.error('Error searching brain nodes:', error);
+    console.error(`Error searching brain nodes for "${searchTerm}":`, error);
     throw error;
   }
 }
@@ -389,8 +473,10 @@ async function searchBrainNodes(searchTerm) {
 module.exports = {
   createBrainNode,
   createRelationship,
+  calculateExpirationDate,
   processEntities,
   getBrainNodesByType,
   getBrainNodeById,
-  searchBrainNodes
+  searchBrainNodes,
+  getCurrentActivities
 }; 
