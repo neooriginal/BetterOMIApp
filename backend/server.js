@@ -9,10 +9,6 @@ dotenv.config();
 
 // Database initialization
 const db = require('./models/database');
-
-// Services that need cleanup on shutdown
-const deepgramService = require('./services/deepgramService');
-
 // Initialize express application
 const app = express();
 
@@ -50,7 +46,8 @@ app.use('/transcriptions', transcriptionsRoutes);
 
 // Home route
 app.get('/', (req, res) => {
-  res.render('memories');
+  //temporary redirect to memories
+  res.redirect("/memories");
 });
 
 // Health check endpoint
