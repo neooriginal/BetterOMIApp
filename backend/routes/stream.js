@@ -8,14 +8,6 @@ const actionItemsService = require('../services/actionItemsService');
 const memoriesService = require('../services/memoriesService');
 const deepgramService = require('../services/deepgramService');
 
-// Store streaming text buffers by session ID
-const streamBuffers = new Map();
-// Store timeouts for processing buffers
-const streamTimeouts = new Map();
-
-// Define inactivity timeout (5 minutes in milliseconds)
-const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
-
 /**
  * Endpoint to receive audio data from Omi device
  */
@@ -38,7 +30,6 @@ router.post('/audio', async (req, res) => {
     }
     try {
       // Pass audio data to Deepgram service for transcription
-      // The service will handle sending the text back to our stream endpoint
       await deepgramService.processAudio(audioData, sessionId);
       
       // Return success response
@@ -68,7 +59,7 @@ router.post('/audio', async (req, res) => {
 });
 
 /**
- * Endpoint to stream text fragments that will be processed after inactivity
+ * Endpoint to process text from transcription
  */
 router.post('/', async (req, res) => {
   try {
@@ -77,98 +68,60 @@ router.post('/', async (req, res) => {
     if (!text || text.trim() === '') {
       return res.status(400).json({
         success: false,
-        message: 'Text fragment is required'
+        message: 'Text is required'
       });
     }
     
     if (!sessionId) {
       return res.status(400).json({
         success: false,
-        message: 'Session ID is required to maintain streaming context'
+        message: 'Session ID is required'
       });
     }
 
     console.log(`Received text for session ${sessionId}, length: ${text.length} characters`);
     
-    // Get or create buffer for this session
-    let buffer = streamBuffers.get(sessionId) || '';
-    
-    // Append text to buffer (with space if buffer not empty)
-    if (buffer.length > 0) {
-      buffer += ' ' + text.trim();
-    } else {
-      buffer += text.trim();
-    }
-    
-    // Update buffer in storage
-    streamBuffers.set(sessionId, buffer);
-    
-    // Clear existing timeout if there is one
-    if (streamTimeouts.has(sessionId)) {
-      clearTimeout(streamTimeouts.get(sessionId));
-    }
-    
-    // Set timeout to process text after inactivity
-    const timeout = setTimeout(async () => {
-      try {
-        console.log(`Processing text stream for session ${sessionId} after inactivity timeout`);
-        
-        // Get the complete buffer text
-        const fullText = streamBuffers.get(sessionId);
-        
-        if (fullText && fullText.trim().length > 0) {
-          console.log(`Processing full text of ${fullText.length} characters for session ${sessionId}`);
-          
-          // Process the accumulated text using the existing services
-          const analysisResult = await llmService.analyzeText(fullText);
-          
-          // Process brain entities
-          await brainService.processEntities(analysisResult);
-          
-          // Process action items
-          if (analysisResult.actionItems && Array.isArray(analysisResult.actionItems) && analysisResult.actionItems.length > 0) {
-            await actionItemsService.processActionItems(analysisResult.actionItems);
-          } else {
-            const actionItems = await llmService.extractActionItems(fullText);
-            await actionItemsService.processActionItems(actionItems);
-          }
-          
-          // Process memories
-          if (analysisResult.memories && Array.isArray(analysisResult.memories) && analysisResult.memories.length > 0) {
-            await memoriesService.processMemories(analysisResult.memories, sessionId);
-          } else {
-            const memories = await llmService.extractMemories(fullText);
-            await memoriesService.processMemories(memories, sessionId);
-          }
-          
-          // Clear the buffer
-          streamBuffers.delete(sessionId);
-        }
-      } catch (error) {
-        console.error(`Error processing stream for session ${sessionId}:`, error);
+    // Process the text using the existing services
+    try {
+      // Process the text
+      const analysisResult = await llmService.analyzeText(text);
+      
+      // Process brain entities
+      await brainService.processEntities(analysisResult);
+      
+      // Process action items
+      if (analysisResult.actionItems && Array.isArray(analysisResult.actionItems) && analysisResult.actionItems.length > 0) {
+        await actionItemsService.processActionItems(analysisResult.actionItems);
+      } else {
+        const actionItems = await llmService.extractActionItems(text);
+        await actionItemsService.processActionItems(actionItems);
       }
       
-      // Remove timeout
-      streamTimeouts.delete(sessionId);
-    }, INACTIVITY_TIMEOUT);
-    
-    // Store the timeout
-    streamTimeouts.set(sessionId, timeout);
+      // Process memories
+      if (analysisResult.memories && Array.isArray(analysisResult.memories) && analysisResult.memories.length > 0) {
+        await memoriesService.processMemories(analysisResult.memories, sessionId);
+      } else {
+        const memories = await llmService.extractMemories(text);
+        await memoriesService.processMemories(memories, sessionId);
+      }
+    } catch (error) {
+      console.error('Error processing text:', error);
+      // Continue to return success to client even if processing failed
+    }
     
     // Return success response
     res.json({
       success: true,
-      message: 'Text received',
-      bufferedCharacters: buffer.length
+      message: 'Text received and processed'
     });
     
   } catch (error) {
-    console.error('Error streaming text:', error);
+    console.error('Error processing text:', error);
     
     // Return a graceful error response
     res.status(500).json({
       success: false,
-      message: 'Error processing text stream',
+      message: 'Error processing text',
       error: error.message
     });
   }
