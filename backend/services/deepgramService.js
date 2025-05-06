@@ -50,13 +50,22 @@ const KEEP_ALIVE_INTERVAL = 15000;
 const AUTO_CLOSE_TIMEOUT = 30000;
 
 // Max reconnection attempts
-const MAX_RECONNECT_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 // Connection monitoring
 let healthCheckInterval = null;
 
 // Keep track of current speaker for each session
 const currentSpeakers = new Map();
+
+// Empty audio data for heartbeat (2 bytes of silence)
+const HEARTBEAT_DATA = Buffer.from([0, 0]);
+
+// Heartbeat interval (10 seconds)
+const HEARTBEAT_INTERVAL = 10000;
+
+// Heartbeat intervals for each connection
+const heartbeatIntervals = new Map();
 
 /**
  * Process audio data through Deepgram
@@ -181,6 +190,52 @@ function setupKeepAlive(sessionId, ws) {
   }, KEEP_ALIVE_INTERVAL);
   
   keepAliveIntervals.set(sessionId, interval);
+  
+  // Set up audio heartbeat to prevent timeouts due to lack of audio data
+  setupHeartbeat(sessionId, ws);
+}
+
+/**
+ * Set up heartbeat mechanism to send minimal audio data
+ * to prevent Deepgram from closing the connection due to inactivity
+ * @param {string} sessionId - Session ID
+ * @param {WebSocket} ws - WebSocket connection
+ */
+function setupHeartbeat(sessionId, ws) {
+  // Clear any existing heartbeat interval
+  if (heartbeatIntervals.has(sessionId)) {
+    clearInterval(heartbeatIntervals.get(sessionId));
+  }
+  
+  // Get current connection status
+  const status = connectionStatus.get(sessionId) || { lastActive: Date.now() };
+  
+  // Set up a new heartbeat interval
+  const interval = setInterval(() => {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Only send heartbeat if no audio data received recently
+        const timeSinceLastActive = Date.now() - status.lastActive;
+        
+        // If more than half of the AUTO_CLOSE_TIMEOUT has passed without activity,
+        // send heartbeat audio data to keep the connection alive
+        if (timeSinceLastActive > (AUTO_CLOSE_TIMEOUT / 2)) {
+          ws.send(HEARTBEAT_DATA);
+          console.log(`Sent audio heartbeat for session ${sessionId}`);
+        }
+      } else {
+        // WebSocket is not open, clear interval
+        clearInterval(interval);
+        heartbeatIntervals.delete(sessionId);
+      }
+    } catch (err) {
+      console.error(`Error sending audio heartbeat for session ${sessionId}:`, err);
+      clearInterval(interval);
+      heartbeatIntervals.delete(sessionId);
+    }
+  }, HEARTBEAT_INTERVAL);
+  
+  heartbeatIntervals.set(sessionId, interval);
 }
 
 /**
@@ -218,6 +273,12 @@ function closeConnection(sessionId) {
   if (keepAliveIntervals.has(sessionId)) {
     clearInterval(keepAliveIntervals.get(sessionId));
     keepAliveIntervals.delete(sessionId);
+  }
+  
+  // Clean up heartbeat interval
+  if (heartbeatIntervals.has(sessionId)) {
+    clearInterval(heartbeatIntervals.get(sessionId));
+    heartbeatIntervals.delete(sessionId);
   }
   
   // Clean up auto-close timeout
@@ -272,6 +333,11 @@ async function handleConnectionFailure(sessionId) {
         keepAliveIntervals.delete(sessionId);
       }
       
+      if (heartbeatIntervals.has(sessionId)) {
+        clearInterval(heartbeatIntervals.get(sessionId));
+        heartbeatIntervals.delete(sessionId);
+      }
+      
       if (autoCloseTimeouts.has(sessionId)) {
         clearTimeout(autoCloseTimeouts.get(sessionId));
         autoCloseTimeouts.delete(sessionId);
@@ -301,6 +367,11 @@ async function handleConnectionFailure(sessionId) {
       keepAliveIntervals.delete(sessionId);
     }
     
+    if (heartbeatIntervals.has(sessionId)) {
+      clearInterval(heartbeatIntervals.get(sessionId));
+      heartbeatIntervals.delete(sessionId);
+    }
+    
     if (autoCloseTimeouts.has(sessionId)) {
       clearTimeout(autoCloseTimeouts.get(sessionId));
       autoCloseTimeouts.delete(sessionId);
@@ -313,6 +384,13 @@ async function handleConnectionFailure(sessionId) {
     
     return;
   }
+  
+  // Attempt to reconnect with exponential backoff
+  const backoffTime = Math.min(1000 * Math.pow(1.5, status.reconnectAttempts - 1), 10000);
+  console.log(`Waiting ${backoffTime}ms before reconnect attempt ${status.reconnectAttempts}`);
+  
+  // Wait before attempting reconnection
+  await new Promise(resolve => setTimeout(resolve, backoffTime));
   
   // Attempt to reconnect
   try {
@@ -334,6 +412,9 @@ async function handleConnectionFailure(sessionId) {
     console.log(`Successfully reconnected Deepgram for session ${sessionId}`);
   } catch (error) {
     console.error(`Failed to reconnect Deepgram for session ${sessionId}:`, error);
+    
+    // Schedule another reconnection attempt
+    setTimeout(() => handleConnectionFailure(sessionId), 1000);
   }
 }
 
@@ -347,14 +428,12 @@ function createDeepgramConnection(sessionId) {
     try {
       console.log(`Creating Deepgram connection for session ${sessionId}`);
       
-      // Enhanced configuration for better accuracy
-      // - higher endpointing threshold to reduce word splitting
-      // - utterances for sentence grouping
-      // - model=nova-3 for best accuracy
-      // - endpointing=500 to wait longer for continuation
+      // Enhanced configuration for better accuracy and reliability
+      // - reduced endpointing to 300ms for faster response
       // - interim_results=true to get continuous results
-      // - diarize=true to enable speaker detection
-      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing=500&utterances=true&interim_results=true&diarize=true";
+      // - utterances=true for better sentence grouping
+      // - keepalive to true to help Deepgram maintain the connection
+      const url = "wss://api.deepgram.com/v1/listen?punctuate=true&model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing=300&utterances=true&interim_results=true&diarize=true&smart_format=true&keepalive=true";
       
       const ws = new WebSocket(url, {
         headers: {
@@ -403,10 +482,14 @@ function createDeepgramConnection(sessionId) {
               const cleanTranscript = transcript.trim();
               console.log(`\nTranscript for session ${sessionId} ${is_final ? '(FINAL)' : '(INTERIM)'} - Speaker ${speaker !== null ? speaker : 'unknown'}:`, cleanTranscript);
               
-              // Only process final transcripts
+              // Process both interim and final transcripts for faster response
+              // For interim results, we'll use a shorter buffer to get faster feedback
               if (is_final) {
-                // Add to buffer or create new one with speaker info
+                // For final results, use the normal buffering mechanism
                 bufferTranscription(cleanTranscript, sessionId, speaker);
+              } else {
+                // For interim results, process immediately with a special flag
+                processInterimTranscription(cleanTranscript, sessionId, speaker);
               }
               
               // Update last active timestamp
@@ -560,22 +643,47 @@ async function storeTranscription(text, sessionId) {
 }
 
 /**
+ * Process interim transcription immediately without buffering
+ * @param {string} text - Transcribed text
+ * @param {string} sessionId - Session ID
+ * @param {number|null} speaker - Speaker number
+ */
+async function processInterimTranscription(text, sessionId, speaker = null) {
+  try {
+    // Format the text with speaker information if available
+    let formattedText = text;
+    if (speaker !== null) {
+      formattedText = `Speaker ${speaker}: ${text}`;
+    }
+    
+    // Send to stream processor immediately
+    await sendTranscriptToStream(formattedText, sessionId, true);
+    
+    console.log(`Processed interim transcription for session ${sessionId}: "${text}"`);
+  } catch (error) {
+    console.error(`Error processing interim transcription for session ${sessionId}:`, error);
+  }
+}
+
+/**
  * Send transcript to the stream endpoint
  * @param {string} text - Transcribed text
  * @param {string} sessionId - Session ID
+ * @param {boolean} isInterim - Whether this is an interim result
  */
-async function sendTranscriptToStream(text, sessionId) {
+async function sendTranscriptToStream(text, sessionId, isInterim = false) {
   try {
     // Use localhost or the server's own address with connection timeout
     await axios.post('http://localhost:3000/stream', {
       text,
-      sessionId
+      sessionId,
+      isInterim
     }, {
-      timeout: 5000 // 5 second timeout
+      timeout: 2000 // Reduced timeout for faster response
     });
-    console.log(`Sent transcript to stream endpoint: ${text.substring(0, 30)}...`);
+    console.log(`Sent ${isInterim ? 'interim ' : ''}transcript to stream endpoint: ${text.substring(0, 30)}...`);
   } catch (error) {
-    console.error('Error sending transcript to stream endpoint:', error);
+    console.error(`Error sending transcript to stream endpoint:`, error);
   }
 }
 
@@ -665,6 +773,12 @@ function cleanupSession(sessionId) {
   if (keepAliveIntervals.has(sessionId)) {
     clearInterval(keepAliveIntervals.get(sessionId));
     keepAliveIntervals.delete(sessionId);
+  }
+  
+  // Clear heartbeat interval
+  if (heartbeatIntervals.has(sessionId)) {
+    clearInterval(heartbeatIntervals.get(sessionId));
+    heartbeatIntervals.delete(sessionId);
   }
   
   // Clear auto-close timeout
