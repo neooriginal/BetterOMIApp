@@ -1,6 +1,8 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const dotenv = require("dotenv")
+dotenv.config()
 
 // Database connection configuration
 const DB_RETRY_INTERVAL = 5000; // 5 seconds
@@ -9,7 +11,7 @@ let retryAttempts = 0;
 let db = null;
 
 // Create data directory if it doesn't exist
-const dataDir = path.join(__dirname, '..', 'data');
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir);
 }
