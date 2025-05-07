@@ -162,6 +162,77 @@ async function completeActionItem(id) {
 }
 
 /**
+ * Check if a similar action item already exists to prevent duplicates
+ * @param {Object} actionItem - Action item details to check
+ * @returns {Promise<boolean>} - Whether a similar action item exists
+ */
+async function checkForDuplicateActionItem(actionItem) {
+  try {
+    // Look for action items with the same title or very similar titles
+    // Limit to pending items only so completed ones can be recreated
+    const similarActionItems = await all(
+      'SELECT * FROM action_items WHERE status = "pending" AND title = ? ORDER BY created_at DESC LIMIT 3',
+      [actionItem.title]
+    );
+    
+    if (similarActionItems && similarActionItems.length > 0) {
+      console.log(`Found ${similarActionItems.length} potential duplicate action items with title: ${actionItem.title}`);
+      return true;
+    }
+    
+    // Also check for fuzzy matches on title to catch slight variations
+    const fuzzyMatches = await all(
+      'SELECT * FROM action_items WHERE status = "pending" ORDER BY created_at DESC LIMIT 20'
+    );
+    
+    // Use a title similarity check on recent items
+    for (const existingItem of fuzzyMatches) {
+      const titleSimilarity = calculateTitleSimilarity(
+        existingItem.title.toLowerCase(),
+        actionItem.title.toLowerCase()
+      );
+      
+      if (titleSimilarity > 0.8) { // 80% similarity threshold for titles
+        console.log(`Found similar action item: "${existingItem.title}" with ${Math.round(titleSimilarity * 100)}% title similarity`);
+        return true;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking for duplicate action item:', error);
+    return false; // Proceed with creation in case of error
+  }
+}
+
+/**
+ * Calculate title similarity using a simple approach
+ * @param {string} title1 - First title
+ * @param {string} title2 - Second title
+ * @returns {number} - Similarity ratio between 0 and 1
+ */
+function calculateTitleSimilarity(title1, title2) {
+  if (!title1 || !title2) return 0;
+  
+  // Use a simple word-based approach for titles
+  const words1 = title1.split(/\s+/).filter(Boolean);
+  const words2 = title2.split(/\s+/).filter(Boolean);
+  
+  // Count matching words
+  let matchCount = 0;
+  for (const word of words1) {
+    if (words2.includes(word)) {
+      matchCount++;
+    }
+  }
+  
+  // Calculate similarity as a ratio of matching words to total unique words
+  const totalUniqueWords = new Set([...words1, ...words2]).size;
+  
+  return matchCount / totalUniqueWords;
+}
+
+/**
  * Process action items from LLM extraction
  * @param {Array} actionItems - Action items extracted by LLM
  * @returns {Promise<Array>} - Created action items
@@ -245,19 +316,26 @@ async function processActionItems(actionItems) {
           }
         }
         
-        const actionItem = await createActionItem({
+        // Check for duplicates before creating
+        const actionItemData = {
           title: item.title,
           description: item.description || '',
           due_date: dueDate,
-          priority: item.priority || 3 // Default to medium priority if not specified
-        });
+          priority: item.priority || 3
+        };
         
+        const isDuplicate = await checkForDuplicateActionItem(actionItemData);
+        if (isDuplicate) {
+          console.log(`Skipping duplicate action item: "${item.title}"`);
+          continue;
+        }
+        
+        const actionItem = await createActionItem(actionItemData);
         results.push(actionItem);
       }
-    } else {
-      console.log('No action items to process - empty or invalid array');
     }
     
+    console.log(`Created ${results.length} unique action items`);
     return results;
   } catch (error) {
     console.error('Error processing action items:', error);
@@ -271,5 +349,7 @@ module.exports = {
   updateActionItem,
   deleteActionItem,
   completeActionItem,
-  processActionItems
+  processActionItems,
+  checkForDuplicateActionItem,
+  calculateTitleSimilarity
 }; 
