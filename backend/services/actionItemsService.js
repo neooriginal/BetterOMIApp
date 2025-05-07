@@ -375,10 +375,17 @@ async function processActionItems(actionItems) {
           title: item.title,
           description: item.description || '',
           due_date: dueDate,
-          priority: item.priority || 3 // Default to medium priority if not specified
-        });
+          priority: item.priority || 3, // Default to medium priority if not specified,
+          expires_at: expiresAt
+        };
         
-        results.push(actionItem);
+        const isDuplicate = await checkForDuplicateActionItem(actionItemData);
+        if (isDuplicate) {
+          console.log(`Skipping duplicate action item: "${item.title}"`);
+          continue;
+        };
+        
+        results.push(actionItemData);
       }
     }
     
