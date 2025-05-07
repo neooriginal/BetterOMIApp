@@ -18,7 +18,6 @@ from omi.bluetooth import listen_to_omi, scan_for_omi_device
 from omi.decoder import OmiOpusDecoder
 from omi.microphone import MicrophoneAudioSource
 from omi.buffer import AudioBufferManager
-from omi.device_logger import DeviceLogger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -246,26 +245,23 @@ async def main():
                     buffer_manager.stop()
         return
 
-    # Start the device logger to capture additional characteristics
-    device_logger = DeviceLogger(omi_mac)
-    logger.info("Starting device logger to capture additional device characteristics...")
-    await device_logger.start_logging(auto_discover=True)
-
     # Connect to the selected Omi and listen for audio data
     try:
         await listen_to_omi(omi_mac, OMI_AUDIO_CHARACTERISTIC_UUID, data_handler)
-    except KeyboardInterrupt:
-        logger.info("\nExiting...")
     except Exception as e:
-        logger.error(f"Error listening to Omi device: {e}")
-    finally:
-        # Clean up device logger on exit
-        if device_logger and device_logger.running:
-            logger.info("Stopping device logger...")
-            await device_logger.stop_logging()
-        
-        if buffer_manager:
-            buffer_manager.stop()
+        logger.error(f"Error in Omi connection: {e}")
+        logger.info("Trying microphone fallback after Omi connection failure")
+        if start_microphone_fallback():
+            # Keep the main thread running while microphone captures
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\nExiting microphone capture...")
+                if mic_source:
+                    mic_source.stop()
+                if buffer_manager:
+                    buffer_manager.stop()
 
 if __name__ == "__main__":
     try:
