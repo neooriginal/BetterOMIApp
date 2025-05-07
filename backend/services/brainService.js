@@ -166,11 +166,14 @@ async function processEntities(analysisResult) {
   try {
     console.log('Processing entities from LLM analysis...');
     
+    // Filter out unknown or placeholder entities
+    const filteredResults = filterPlaceholderEntities(analysisResult);
+    
     // Process people
-    if (analysisResult.people && Array.isArray(analysisResult.people)) {
-      console.log(`Processing ${analysisResult.people.length} people`);
+    if (filteredResults.people && Array.isArray(filteredResults.people)) {
+      console.log(`Processing ${filteredResults.people.length} people`);
       
-      for (const person of analysisResult.people) {
+      for (const person of filteredResults.people) {
         // Determine expiration date - check specific date first, then days, or null if permanent
         let expiresAt = null;
         if (person.temporary) {
@@ -199,10 +202,10 @@ async function processEntities(analysisResult) {
     }
     
     // Process locations
-    if (analysisResult.locations && Array.isArray(analysisResult.locations)) {
-      console.log(`Processing ${analysisResult.locations.length} locations`);
+    if (filteredResults.locations && Array.isArray(filteredResults.locations)) {
+      console.log(`Processing ${filteredResults.locations.length} locations`);
       
-      for (const location of analysisResult.locations) {
+      for (const location of filteredResults.locations) {
         // Determine expiration date - check specific date first, then days, or null if permanent
         let expiresAt = null;
         if (location.temporary) {
@@ -231,10 +234,10 @@ async function processEntities(analysisResult) {
     }
     
     // Process events
-    if (analysisResult.events && Array.isArray(analysisResult.events)) {
-      console.log(`Processing ${analysisResult.events.length} events`);
+    if (filteredResults.events && Array.isArray(filteredResults.events)) {
+      console.log(`Processing ${filteredResults.events.length} events`);
       
-      for (const event of analysisResult.events) {
+      for (const event of filteredResults.events) {
         // Determine expiration date - check specific date first, then days, or null if permanent
         let expiresAt = null;
         if (event.temporary) {
@@ -299,10 +302,10 @@ async function processEntities(analysisResult) {
     }
     
     // Process explicit relationships
-    if (analysisResult.relationships && Array.isArray(analysisResult.relationships)) {
-      console.log(`Processing ${analysisResult.relationships.length} explicit relationships`);
+    if (filteredResults.relationships && Array.isArray(filteredResults.relationships)) {
+      console.log(`Processing ${filteredResults.relationships.length} explicit relationships`);
       
-      for (const rel of analysisResult.relationships) {
+      for (const rel of filteredResults.relationships) {
         // Find the "from" entity node
         let fromNode = null;
         results.people.forEach(person => {
@@ -355,6 +358,64 @@ async function processEntities(analysisResult) {
     console.error(error.stack);
     return results; // Return the results we have so far instead of failing completely
   }
+}
+
+/**
+ * Filter out placeholder or unknown entities
+ * @param {Object} analysisResult - The raw analysis result from LLM
+ * @returns {Object} - Filtered analysis result
+ */
+function filterPlaceholderEntities(analysisResult) {
+  const result = { ...analysisResult };
+  
+  // Define words that might indicate placeholders
+  const placeholderTerms = ['unknown', 'placeholder', 'undefined', 'none', 'n/a', 'not specified', 'unspecified', 'unnamed'];
+  
+  // Helper function to check if a name is a placeholder
+  const isPlaceholder = (name) => {
+    if (!name || name.trim() === '') return true;
+    
+    const lowerName = name.toLowerCase();
+    return placeholderTerms.some(term => lowerName.includes(term) || lowerName === term);
+  };
+  
+  // Filter people
+  if (result.people && Array.isArray(result.people)) {
+    result.people = result.people.filter(person => 
+      !isPlaceholder(person.name) && 
+      person.name.trim().length > 0
+    );
+  }
+  
+  // Filter locations
+  if (result.locations && Array.isArray(result.locations)) {
+    result.locations = result.locations.filter(location => 
+      !isPlaceholder(location.name) && 
+      location.name.trim().length > 0
+    );
+  }
+  
+  // Filter events
+  if (result.events && Array.isArray(result.events)) {
+    result.events = result.events.filter(event => 
+      !isPlaceholder(event.name) && 
+      event.name.trim().length > 0
+    );
+  }
+  
+  // Filter relationships
+  if (result.relationships && Array.isArray(result.relationships)) {
+    result.relationships = result.relationships.filter(relation => 
+      !isPlaceholder(relation.from) && 
+      !isPlaceholder(relation.to) && 
+      relation.from.trim().length > 0 && 
+      relation.to.trim().length > 0
+    );
+  }
+  
+  console.log(`Filtered entities: Removed ${(analysisResult.people?.length || 0) - (result.people?.length || 0)} people, ${(analysisResult.locations?.length || 0) - (result.locations?.length || 0)} locations, ${(analysisResult.events?.length || 0) - (result.events?.length || 0)} events, ${(analysisResult.relationships?.length || 0) - (result.relationships?.length || 0)} relationships`);
+  
+  return result;
 }
 
 /**

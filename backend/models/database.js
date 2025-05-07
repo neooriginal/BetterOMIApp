@@ -96,7 +96,8 @@ async function initDatabase() {
       due_date DATETIME,
       priority INTEGER DEFAULT 1,
       status TEXT DEFAULT 'pending',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME
     )`),
     
     run(`CREATE TABLE IF NOT EXISTS memories (
@@ -211,6 +212,9 @@ async function cleanupExpiredItems() {
     
     // Delete expired transcriptions
     await run(`DELETE FROM transcriptions WHERE expires_at IS NOT NULL AND expires_at < ?`, [now]);
+    
+    // Delete expired action items
+    await run(`DELETE FROM action_items WHERE expires_at IS NOT NULL AND expires_at < ?`, [now]);
     
     console.log('Cleanup of expired items completed');
   } catch (error) {

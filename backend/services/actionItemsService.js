@@ -7,11 +7,11 @@ const { run, get, all } = require('../models/database');
  */
 async function createActionItem(actionItem) {
   try {
-    const { title, description, due_date, priority = 1 } = actionItem;
+    const { title, description, due_date, priority = 1, expires_at } = actionItem;
     
     const result = await run(
-      'INSERT INTO action_items (title, description, due_date, priority) VALUES (?, ?, ?, ?)',
-      [title, description, due_date, priority]
+      'INSERT INTO action_items (title, description, due_date, priority, expires_at) VALUES (?, ?, ?, ?, ?)',
+      [title, description, due_date, priority, expires_at]
     );
     
     return {
@@ -21,7 +21,8 @@ async function createActionItem(actionItem) {
       due_date,
       priority,
       status: 'pending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      expires_at
     };
   } catch (error) {
     console.error('Error creating action item:', error);
@@ -75,7 +76,7 @@ async function getActionItems(options = {}) {
  */
 async function updateActionItem(id, updates) {
   try {
-    const { title, description, due_date, priority, status } = updates;
+    const { title, description, due_date, priority, status, expires_at } = updates;
     
     // Build update query dynamically based on provided fields
     const setFields = [];
@@ -104,6 +105,11 @@ async function updateActionItem(id, updates) {
     if (status !== undefined) {
       setFields.push('status = ?');
       params.push(status);
+    }
+    
+    if (expires_at !== undefined) {
+      setFields.push('expires_at = ?');
+      params.push(expires_at);
     }
     
     if (setFields.length === 0) {
@@ -181,6 +187,8 @@ async function processActionItems(actionItems) {
         
         // Format due date if provided
         let dueDate = null;
+        let expiresAt = null;
+        
         if (item.dueDate || item.due_date) {
           const dateStr = item.dueDate || item.due_date;
           
@@ -189,6 +197,11 @@ async function processActionItems(actionItems) {
             const parsedDate = new Date(dateStr);
             if (!isNaN(parsedDate.getTime())) {
               dueDate = parsedDate.toISOString();
+              
+              // Set expiration to 7 days after due date
+              const expiration = new Date(parsedDate);
+              expiration.setDate(expiration.getDate() + 7);
+              expiresAt = expiration.toISOString();
             } else {
               // Handle natural language date references
               const today = new Date();
@@ -197,18 +210,34 @@ async function processActionItems(actionItems) {
               if (lowerDateStr.includes('asap') || lowerDateStr.includes('as soon as possible')) {
                 // Set to today
                 dueDate = today.toISOString();
+                // Expire in 3 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 3);
+                expiresAt = expiration.toISOString();
               } else if (lowerDateStr.includes('tomorrow')) {
                 const tomorrow = new Date(today);
                 tomorrow.setDate(today.getDate() + 1);
                 dueDate = tomorrow.toISOString();
+                // Expire in 4 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 4);
+                expiresAt = expiration.toISOString();
               } else if (lowerDateStr.includes('next week')) {
                 const nextWeek = new Date(today);
                 nextWeek.setDate(today.getDate() + 7);
                 dueDate = nextWeek.toISOString();
+                // Expire in 14 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 14);
+                expiresAt = expiration.toISOString();
               } else if (lowerDateStr.includes('next month')) {
                 const nextMonth = new Date(today);
                 nextMonth.setMonth(today.getMonth() + 1);
                 dueDate = nextMonth.toISOString();
+                // Expire in 45 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 45);
+                expiresAt = expiration.toISOString();
               } else if (lowerDateStr.includes('days') || lowerDateStr.includes('day')) {
                 // Extract number of days if present
                 const match = lowerDateStr.match(/(\d+)\s+days?/);
@@ -217,23 +246,39 @@ async function processActionItems(actionItems) {
                   const future = new Date(today);
                   future.setDate(today.getDate() + days);
                   dueDate = future.toISOString();
+                  // Expire in days + 7 days
+                  const expiration = new Date(today);
+                  expiration.setDate(today.getDate() + days + 7);
+                  expiresAt = expiration.toISOString();
                 } else {
                   // Default to 3 days if no specific number
                   const threeDays = new Date(today);
                   threeDays.setDate(today.getDate() + 3);
                   dueDate = threeDays.toISOString();
+                  // Expire in 10 days
+                  const expiration = new Date(today);
+                  expiration.setDate(today.getDate() + 10);
+                  expiresAt = expiration.toISOString();
                 }
               } else if (lowerDateStr.includes('hour') || lowerDateStr.includes('hrs')) {
                 // For "hours" references, set to tomorrow
                 const tomorrow = new Date(today);
                 tomorrow.setDate(today.getDate() + 1);
                 dueDate = tomorrow.toISOString();
+                // Expire in 4 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 4);
+                expiresAt = expiration.toISOString();
               } else {
                 // For other natural language dates, default to 3 days from now
                 console.log(`Converting natural language date "${dateStr}" to 3 days from now`);
                 const threeDays = new Date(today);
                 threeDays.setDate(today.getDate() + 3);
                 dueDate = threeDays.toISOString();
+                // Expire in 10 days
+                const expiration = new Date(today);
+                expiration.setDate(today.getDate() + 10);
+                expiresAt = expiration.toISOString();
               }
             }
           } catch (e) {
@@ -242,14 +287,24 @@ async function processActionItems(actionItems) {
             const threeDays = new Date();
             threeDays.setDate(threeDays.getDate() + 3);
             dueDate = threeDays.toISOString();
+            // Expire in 10 days
+            const expiration = new Date();
+            expiration.setDate(expiration.getDate() + 10);
+            expiresAt = expiration.toISOString();
           }
+        } else {
+          // If no due date, set expiration to 30 days from now for cleanup
+          const expiration = new Date();
+          expiration.setDate(expiration.getDate() + 30);
+          expiresAt = expiration.toISOString();
         }
         
         const actionItem = await createActionItem({
           title: item.title,
           description: item.description || '',
           due_date: dueDate,
-          priority: item.priority || 3 // Default to medium priority if not specified
+          priority: item.priority || 3,
+          expires_at: expiresAt
         });
         
         results.push(actionItem);

@@ -36,7 +36,6 @@ const actionItemsRoutes = require('./routes/actionItems');
 const memoriesRoutes = require('./routes/memories');
 const streamRoutes = require('./routes/stream');
 const transcriptionsRoutes = require('./routes/transcriptions');
-const brainRoutes = require('./routes/brainVisualization');
 
 // Register routes
 app.use('/input', inputRoutes);
@@ -44,7 +43,6 @@ app.use('/action-items', actionItemsRoutes);
 app.use('/memories', memoriesRoutes);
 app.use('/stream', streamRoutes);
 app.use('/transcriptions', transcriptionsRoutes);
-app.use('/brain', brainRoutes);
 
 // Home route
 app.get('/', (req, res) => {

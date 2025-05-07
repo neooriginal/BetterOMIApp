@@ -130,6 +130,91 @@ async function analyzeText(text) {
 }
 
 /**
+ * Analyze text for brain entities specifically
+ * @param {string} text - The input text to analyze
+ * @returns {Promise<Object>} - Structured information about people, locations, events, and relationships
+ */
+async function analyzeBrainEntities(text) {
+  try {
+    console.log('Analyzing text for brain entities with LLM...');
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Or another suitable model
+      messages: [
+        {
+          role: "system",
+          content: `You are an AI assistant that analyzes text and extracts structured information for a knowledge graph. 
+          Extract ONLY the following entities:
+          
+          1. People mentioned (names, roles)
+          2. Locations mentioned
+          3. Events mentioned (with dates if available)
+          4. Current activities or states (what the person is doing/experiencing right now)
+          5. Relationships between entities
+          
+          For each entity, provide:
+          - Name (required - use specific and descriptive names instead of placeholders)
+          - Importance score from 1-5 (5 being highest)
+          - Whether it should be permanent or temporary (boolean field "temporary")
+          - If temporary, suggest an expiration time in days or a specific date (field "expirationDays" or "expirationDate")
+          - Additional relevant details specific to the entity type
+          
+          IMPORTANT: For current activities (what someone is doing right now), ALWAYS:
+          - Create a special "activity" event
+          - Mark it as temporary with a short expiration time (typically 2-6 hours)
+          - Set proper importance based on the nature of the activity
+          - Include detailed context to make it useful for recall later
+          - Connect it to relevant people, locations, and other entities
+          
+          IMPORTANT: DO NOT create "Unknown" or "Placeholder" entities. Instead, extract actual entities from the text or leave the arrays empty.
+          
+          Return your response in the following JSON structure:
+          {
+            "people": [
+              {"name": "Person Name", "role": "Their role", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ],
+            "locations": [
+              {"name": "Location Name", "details": "Location details", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ],
+            "events": [
+              {"name": "Event Name", "date": "Event date if known", "description": "Event description", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD", "people": ["Person1", "Person2"], "location": "Location Name", "type": "regular/activity"}
+            ],
+            "relationships": [
+              {"from": "Entity1 Name", "to": "Entity2 Name", "type": "relationship type", "description": "relationship description", "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ]
+          }`
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    // Parse the response to get structured data
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log(`Extracted ${result.people?.length || 0} people, ${result.locations?.length || 0} locations, ${result.events?.length || 0} events, ${result.relationships?.length || 0} relationships`);
+    
+    // Ensure we have arrays for each entity type
+    if (!result.people) result.people = [];
+    if (!result.locations) result.locations = [];
+    if (!result.events) result.events = [];
+    if (!result.relationships) result.relationships = [];
+    
+    return result;
+  } catch (error) {
+    console.error('Error analyzing brain entities with OpenAI:', error);
+    // Return empty arrays to avoid placeholder entities
+    return {
+      people: [],
+      locations: [],
+      events: [],
+      relationships: []
+    };
+  }
+}
+
+/**
  * Extract action items from text
  * @param {string} text - The input text to analyze
  * @returns {Promise<Array>} - List of action items
@@ -206,9 +291,15 @@ async function extractMemories(text) {
           6. Memories should be at least 250-500 words for importance 3+, and at least 150 words for others
           7. DO NOT summarize - preserve ALL details that might be relevant for future recall
           8. Always include at least 5 detailed key points for each memory
+          9. If the input text is too short or lacks sufficient detail, EXPAND on the content by:
+             - Adding relevant background context based on implied information
+             - Fleshing out details that are only briefly mentioned
+             - Creating more comprehensive key points that explore implications
+             - Developing the narrative to meet the minimum word count requirements
+          10. ALWAYS ensure the content meets the minimum word requirements rather than skipping the memory
           
           Format your response as a JSON object with a property called "memories" containing an array of memory objects.
-          If there is not enough meaningful content to create a detailed memory, return an empty array.`
+          IMPORTANT: Rather than returning an empty array when content is insufficient, expand the content to meet requirements.`
         },
         {
           role: "user",
@@ -238,6 +329,7 @@ async function extractMemories(text) {
 
 module.exports = {
   analyzeText,
+  analyzeBrainEntities,
   extractActionItems,
   extractMemories
 }; 
