@@ -29,7 +29,7 @@ async function analyzeText(text) {
           6. Relationships between entities (IMPORTANT: Identify how entities are connected to each other)
           
           For each entity, provide:
-          - Name (required)
+          - Name (required - use specific and descriptive names instead of placeholders)
           - Importance score from 1-5 (5 being highest)
           - Whether it should be permanent or temporary (boolean field "temporary")
           - If temporary, suggest an expiration time in days or a specific date (field "expirationDays" or "expirationDate")
@@ -41,6 +41,8 @@ async function analyzeText(text) {
           - Set proper importance based on the nature of the activity
           - Include detailed context to make it useful for recall later
           - Connect it to relevant people, locations, and other entities
+          
+          IMPORTANT: DO NOT create "Unknown" or "Placeholder" entities. Instead, extract actual entities from the text or leave the arrays empty.
           
           Examples of current activities to identify:
           - Eating (what food, where, with whom)
@@ -89,9 +91,7 @@ async function analyzeText(text) {
           
           Relationship types could include: "knows", "works_with", "reports_to", "located_at", "participated_in", "organized", "is_doing", etc.
           
-          Always include at least one entity in each category and identify relationships between entities, even if you have to infer from context. If truly none are mentioned, create a placeholder with "Unknown" as the name.
-          
-          IMPORTANT: Be EXTREMELY thorough in identifying current activities and states. Any mention of what someone is currently doing should be captured as a temporary event with appropriate short-term expiration.
+          If there are no entities of a certain type mentioned in the text, return an empty array for that entity type. DO NOT create placeholder entities.
           `
         },
         {
@@ -107,9 +107,9 @@ async function analyzeText(text) {
     console.log(`Extracted ${result.people?.length || 0} people, ${result.locations?.length || 0} locations, ${result.events?.length || 0} events, ${result.relationships?.length || 0} relationships, ${result.memories?.length || 0} memories, ${result.actionItems?.length || 0} action items`);
     
     // Ensure we have arrays for each entity type
-    if (!result.people) result.people = [{ name: "Unknown Person", role: "Unknown", importance: 1, temporary: true, expirationDays: 7 }];
-    if (!result.locations) result.locations = [{ name: "Unknown Location", details: "No details", importance: 1, temporary: true, expirationDays: 7 }];
-    if (!result.events) result.events = [{ name: "Unknown Event", description: "No description", importance: 1, temporary: true, expirationDays: 7 }];
+    if (!result.people) result.people = [];
+    if (!result.locations) result.locations = [];
+    if (!result.events) result.events = [];
     if (!result.relationships) result.relationships = [];
     if (!result.memories) result.memories = [];
     if (!result.actionItems) result.actionItems = [];
@@ -117,14 +117,99 @@ async function analyzeText(text) {
     return result;
   } catch (error) {
     console.error('Error analyzing text with OpenAI:', error);
-    // Return a minimal structure to prevent downstream errors
+    // Return empty arrays to avoid placeholder entities
     return {
-      people: [{ name: "Error Processing Person", role: "Unknown", importance: 1, temporary: true, expirationDays: 7 }],
-      locations: [{ name: "Error Processing Location", details: "Error", importance: 1, temporary: true, expirationDays: 7 }],
-      events: [{ name: "Error Processing Event", description: "Error", importance: 1, temporary: true, expirationDays: 7 }],
+      people: [],
+      locations: [],
+      events: [],
       relationships: [],
       memories: [],
       actionItems: []
+    };
+  }
+}
+
+/**
+ * Analyze text for brain entities specifically
+ * @param {string} text - The input text to analyze
+ * @returns {Promise<Object>} - Structured information about people, locations, events, and relationships
+ */
+async function analyzeBrainEntities(text) {
+  try {
+    console.log('Analyzing text for brain entities with LLM...');
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Or another suitable model
+      messages: [
+        {
+          role: "system",
+          content: `You are an AI assistant that analyzes text and extracts structured information for a knowledge graph. 
+          Extract ONLY the following entities:
+          
+          1. People mentioned (names, roles)
+          2. Locations mentioned
+          3. Events mentioned (with dates if available)
+          4. Current activities or states (what the person is doing/experiencing right now)
+          5. Relationships between entities
+          
+          For each entity, provide:
+          - Name (required - use specific and descriptive names instead of placeholders)
+          - Importance score from 1-5 (5 being highest)
+          - Whether it should be permanent or temporary (boolean field "temporary")
+          - If temporary, suggest an expiration time in days or a specific date (field "expirationDays" or "expirationDate")
+          - Additional relevant details specific to the entity type
+          
+          IMPORTANT: For current activities (what someone is doing right now), ALWAYS:
+          - Create a special "activity" event
+          - Mark it as temporary with a short expiration time (typically 2-6 hours)
+          - Set proper importance based on the nature of the activity
+          - Include detailed context to make it useful for recall later
+          - Connect it to relevant people, locations, and other entities
+          
+          IMPORTANT: DO NOT create "Unknown" or "Placeholder" entities. Instead, extract actual entities from the text or leave the arrays empty.
+          
+          Return your response in the following JSON structure:
+          {
+            "people": [
+              {"name": "Person Name", "role": "Their role", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ],
+            "locations": [
+              {"name": "Location Name", "details": "Location details", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ],
+            "events": [
+              {"name": "Event Name", "date": "Event date if known", "description": "Event description", "importance": 1-5, "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD", "people": ["Person1", "Person2"], "location": "Location Name", "type": "regular/activity"}
+            ],
+            "relationships": [
+              {"from": "Entity1 Name", "to": "Entity2 Name", "type": "relationship type", "description": "relationship description", "temporary": true/false, "expirationDays": number, "expirationDate": "YYYY-MM-DD"}
+            ]
+          }`
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    // Parse the response to get structured data
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log(`Extracted ${result.people?.length || 0} people, ${result.locations?.length || 0} locations, ${result.events?.length || 0} events, ${result.relationships?.length || 0} relationships`);
+    
+    // Ensure we have arrays for each entity type
+    if (!result.people) result.people = [];
+    if (!result.locations) result.locations = [];
+    if (!result.events) result.events = [];
+    if (!result.relationships) result.relationships = [];
+    
+    return result;
+  } catch (error) {
+    console.error('Error analyzing brain entities with OpenAI:', error);
+    // Return empty arrays to avoid placeholder entities
+    return {
+      people: [],
+      locations: [],
+      events: [],
+      relationships: []
     };
   }
 }
@@ -190,7 +275,7 @@ async function extractMemories(text) {
           
           For each memory, extract the following details:
           - Title: A concise, descriptive title that clearly identifies the memory content
-          - Content: The COMPREHENSIVE, DETAILED information - include COMPLETE context, FULL quotes, and ALL specific details
+          - Content: The COMPREHENSIVE, DETAILED information - include COMPLETE context, FULL quotes, and ALL specific details. This should be multiple paragraphs with extensive detail.
           - Context: Thorough background information that helps understand why this memory is important
           - Participants: All people involved in this conversation or information
           - Key Points: Extensive bullet points of ALL important takeaways (at least 3-5 points per memory)
@@ -198,15 +283,23 @@ async function extractMemories(text) {
           - Expiration: When this memory should expire (in days or "permanent")
           
           CRITICAL INSTRUCTIONS:
-          1. NEVER truncate or summarize the "Content" field - preserve FULL details, complete quotes, and ALL specific information
-          2. The "Content" field must be COMPREHENSIVE - include EVERYTHING that might be useful later
-          3. Create EXTREMELY DETAILED memories with as much information as possible
-          4. For conversations, capture EXACTLY who said what, the full exchange, specific wording, and ALL conclusions
-          5. Make sure each memory is COMPLETE and STANDALONE - assume the reader has no other context
-          6. DO NOT create short/brief memories - each memory should be THOROUGH and EXHAUSTIVE
-          7. Always include at least 3-5 detailed key points for each memory
+          1. NEVER create placeholder or "Unknown" memories - extract meaningful content or return an empty array
+          2. The "Content" field MUST be multiple paragraphs (at least 3-4) with extensive detail
+          3. Include ALL specific details, facts, figures, dates, and exact wording from the source text
+          4. Each memory should tell a complete story with beginning, middle, and end
+          5. For conversations, capture EXACTLY who said what, the full exchange, and conclusions 
+          6. Memories should be at least 250-500 words for importance 3+, and at least 150 words for others
+          7. DO NOT summarize - preserve ALL details that might be relevant for future recall
+          8. Always include at least 5 detailed key points for each memory
+          9. If the input text is too short or lacks sufficient detail, EXPAND on the content by:
+             - Adding relevant background context based on implied information
+             - Fleshing out details that are only briefly mentioned
+             - Creating more comprehensive key points that explore implications
+             - Developing the narrative to meet the minimum word count requirements
+          10. ALWAYS ensure the content meets the minimum word requirements rather than skipping the memory
           
-          Format your response as a JSON object with a property called "memories" containing an array of memory objects.`
+          Format your response as a JSON object with a property called "memories" containing an array of memory objects.
+          IMPORTANT: Rather than returning an empty array when content is insufficient, expand the content to meet requirements.`
         },
         {
           role: "user",
@@ -219,37 +312,24 @@ async function extractMemories(text) {
     // Parse the response
     const result = JSON.parse(response.choices[0].message.content);
     console.log(`Extracted ${result.memories ? result.memories.length : 0} memories from text`);
-    if (!result.memories || result.memories.length === 0) {
-      console.log('LLM returned no memories, creating a default one');
-      // If no memories were returned, create a default memory
-      return [{
-        title: "Text Information",
-        content: text, // No longer truncating the content
-        context: "Default memory created from text input",
-        participants: ["Unknown"],
-        keyPoints: ["Contains the original text input", "Generated as a fallback", "May require manual review"],
-        importance: 2,
-        expiration: 30
-      }];
+    
+    // If the memories array exists but is empty, return it as is (empty array)
+    if (result.memories) {
+      return result.memories;
     }
-    return result.memories || [];
+    
+    // If memories property doesn't exist, return empty array
+    return [];
   } catch (error) {
     console.error('Error extracting memories with OpenAI:', error);
-    // In case of error, create a default memory so we don't return empty
-    return [{
-      title: "Stored Information",
-      content: text, // No longer truncating the content
-      context: "Error occurred during memory extraction",
-      participants: ["Unknown"],
-      keyPoints: ["Contains original text input", "Error occurred during processing", "May need manual review"],
-      importance: 1,
-      expiration: 14
-    }];
+    // In case of error, return an empty array
+    return [];
   }
 }
 
 module.exports = {
   analyzeText,
+  analyzeBrainEntities,
   extractActionItems,
   extractMemories
 }; 

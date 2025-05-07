@@ -271,13 +271,28 @@ async function processMemories(memories, sessionId) {
       console.log(`Processing ${memories.length} consolidated memories`);
       
       for (const item of memories) {
-        // Skip empty memories
+        // Skip empty memories or memories with insufficient content
         if (!item.title || !item.content || item.title.trim() === '' || item.content.trim() === '') {
           console.log('Skipping empty memory item');
           continue;
         }
         
-        console.log(`Processing memory: "${item.title}"`);
+        // Skip memories with placeholder or generic titles
+        if (/^(unknown|placeholder|generic|text information|stored information)$/i.test(item.title.trim())) {
+          console.log(`Skipping generic memory with title: "${item.title}"`);
+          continue;
+        }
+        
+        // Validate memory content length - ensure it's substantial
+        const contentWords = item.content.split(/\s+/).length;
+        const minimumWords = item.importance >= 3 ? 200 : 100;
+        
+        if (contentWords < minimumWords) {
+          console.log(`Skipping memory with insufficient content: ${contentWords} words (minimum: ${minimumWords})`);
+          continue;
+        }
+        
+        console.log(`Processing memory: "${item.title}" (${contentWords} words)`);
         
         // Calculate expiration date if provided
         let expiresAt = null;

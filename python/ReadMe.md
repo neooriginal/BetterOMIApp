@@ -9,6 +9,7 @@ This is the Python client component of the BetterOMI application, which captures
 - Falls back to computer microphone if no Omi device is found
 - Streams audio data to the backend server for processing
 - Buffer management for reliable audio transmission
+- Device logger for capturing and logging additional device characteristics
 
 ## Prerequisites
 
@@ -20,37 +21,41 @@ This is the Python client component of the BetterOMI application, which captures
 ## Installation
 
 1. Install the required system libraries:
+
    ```
    # macOS
    brew install opus portaudio
-   
+
    # Ubuntu/Debian
    sudo apt-get install libopus-dev portaudio19-dev
-   
+
    # Windows
    # Download Opus from https://opus-codec.org/downloads/
    # Download PortAudio from http://www.portaudio.com/download.html
    ```
 
 2. Create and activate a Python virtual environment:
+
    ```
    # Create virtual environment
    python -m venv venv
-   
+
    # Activate virtual environment
    # On macOS/Linux
    source venv/bin/activate
-   
+
    # On Windows
    venv\Scripts\activate
    ```
 
 3. Install Python dependencies:
+
    ```
    pip install -r requirements.txt
    ```
-   
+
    If you encounter issues with PyAudio or other packages, you can install the core dependencies separately:
+
    ```
    pip install requests bleak python-dotenv opuslib
    ```
@@ -64,6 +69,7 @@ This is the Python client component of the BetterOMI application, which captures
 ## Usage
 
 Run the Python client:
+
 ```
 # Activate the virtual environment (if not already activated)
 source venv/bin/activate  # On macOS/Linux
@@ -74,6 +80,17 @@ venv\Scripts\activate  # On Windows
 python main.py
 ```
 
+### Device Logger
+
+The application includes a device logger that automatically captures and logs data from all available characteristics of the Omi device. The logs are stored in JSON format in the `device_logs` directory.
+
+You can also run the device logger independently:
+
+```
+python -m omi.device_logger <MAC_ADDRESS>
+```
+
+Where `<MAC_ADDRESS>` is the Bluetooth address of your Omi device.
 
 ## Troubleshooting
 
@@ -81,7 +98,7 @@ python main.py
 - **Backend connection failed**: Ensure the backend server is running and accessible
 - **Audio issues**: Check that Opus is properly installed and that your microphone is working
 - **Missing modules error**: Make sure you're running the application within the activated virtual environment
-- **PyAudio installation fails**: 
+- **PyAudio installation fails**:
   - Ensure PortAudio is installed properly (see Installation step 1)
   - On macOS, you may need to install pyaudio with: `pip install --global-option=build_ext --global-option="-I/opt/homebrew/include" --global-option="-L/opt/homebrew/lib" pyaudio`
   - Consider using a pre-built PyAudio binary if installation continues to fail

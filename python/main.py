@@ -18,6 +18,7 @@ from omi.bluetooth import listen_to_omi, scan_for_omi_device
 from omi.decoder import OmiOpusDecoder
 from omi.microphone import MicrophoneAudioSource
 from omi.buffer import AudioBufferManager
+from omi.device_logger import DeviceLogger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -62,57 +63,8 @@ mic_source = None
 # Initialize buffer manager
 buffer_manager = None
 
-# Audio energy threshold for silence detection
-ENERGY_THRESHOLD = 500  # Adjust based on testing
-# Time between audio sample sends to avoid overwhelming backend
-MIN_SEND_INTERVAL = 0.1  # seconds
-last_send_time = 0
-
-def is_audio_silent(audio_data):
-    """Check if audio data contains meaningful sound or is just silence"""
-    try:
-        # Convert bytes to numpy array (assuming 16-bit PCM)
-        if len(audio_data) < 32:  # Minimum size check
-            return True
-            
-        # Ensure we have a valid buffer length for int16 conversion
-        # Strip any header if present (first 3 bytes from Omi format)
-        if len(audio_data) % 2 != 0:
-            # If odd length, assume there's a 3-byte header
-            if len(audio_data) > 3:
-                audio_data = audio_data[3:]
-            else:
-                return True  # Too small to process
-                
-        # If we still have odd length, trim the last byte
-        if len(audio_data) % 2 != 0:
-            audio_data = audio_data[:-1]
-            
-        # Convert to numpy array (16-bit PCM)
-        audio_array = np.frombuffer(audio_data, dtype=np.int16)
-        
-        # Calculate RMS energy
-        energy = np.sqrt(np.mean(np.square(audio_array.astype(np.float32))))
-        
-        # Check if energy exceeds threshold
-        is_silent = energy < ENERGY_THRESHOLD
-        
-        # For debugging
-        if not is_silent:
-            logger.debug(f"Audio energy: {energy:.2f}")
-            
-        return is_silent
-    except Exception as e:
-        logger.error(f"Error checking audio energy: {e}")
-        return False  # Assume not silent on error
-
 def send_audio_to_backend(audio_data, bypass_silence_check=False):
-    """Send PCM audio data to the backend API with retry logic"""
-    
-    # Skip if audio is silent or too small (only if not bypassing silence check)
-    if not bypass_silence_check and (len(audio_data) < 100 or is_audio_silent(audio_data)):
-        return True  # Pretend we sent it successfully
-    
+    """Send PCM audio data to the backend API directly without extra checks"""
     try:
         # Base64 encode the binary audio data
         encoded_audio = base64.b64encode(audio_data).decode('utf-8')
@@ -128,12 +80,6 @@ def send_audio_to_backend(audio_data, bypass_silence_check=False):
         else:
             logger.warning(f"Error sending audio to backend: {response.status_code}")
             return False
-    except requests.exceptions.Timeout:
-        logger.error("Timeout when connecting to backend")
-        return False
-    except requests.exceptions.ConnectionError:
-        logger.error("Connection error when sending audio to backend")
-        return False
     except Exception as e:
         logger.error(f"Error connecting to backend: {e}")
         return False
@@ -145,22 +91,16 @@ def data_handler(sender, data):
         # Decode the Opus audio
         pcm_data = decoder.decode_packet(data)
         if pcm_data:
-            # Use buffer manager to send or buffer audio
-            # Always send Omi data, bypassing silence check
-            if buffer_manager:
-                buffer_manager.send(pcm_data, True)
-            else:
-                send_audio_to_backend(pcm_data, True)
+            # Send audio data directly
+            send_audio_to_backend(pcm_data)
     else:
         # For microphone (already PCM data)
         # If data starts with the 3-byte Omi header we added in microphone.py, strip it
         if len(data) > 3 and data.startswith(b'\x00\x00\x00'):
             data = data[3:]
-            
-        if buffer_manager:
-            buffer_manager.send(data)
-        else:
-            send_audio_to_backend(data)
+        
+        # Send audio data directly
+        send_audio_to_backend(data)
 
 async def check_backend_connection():
     """Check if backend server is reachable"""
@@ -202,7 +142,7 @@ async def main():
     if not await check_backend_connection():
         return
     
-    # Initialize buffer manager
+    # Initialize buffer manager - simplified version, kept for compatibility
     buffer_manager = AudioBufferManager(send_audio_to_backend)
     buffer_manager.start()
     
@@ -306,23 +246,26 @@ async def main():
                     buffer_manager.stop()
         return
 
+    # Start the device logger to capture additional characteristics
+    device_logger = DeviceLogger(omi_mac)
+    logger.info("Starting device logger to capture additional device characteristics...")
+    await device_logger.start_logging(auto_discover=True)
+
     # Connect to the selected Omi and listen for audio data
     try:
         await listen_to_omi(omi_mac, OMI_AUDIO_CHARACTERISTIC_UUID, data_handler)
+    except KeyboardInterrupt:
+        logger.info("\nExiting...")
     except Exception as e:
-        logger.error(f"Error in Omi connection: {e}")
-        logger.info("Trying microphone fallback after Omi connection failure")
-        if start_microphone_fallback():
-            # Keep the main thread running while microphone captures
-            try:
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("\nExiting microphone capture...")
-                if mic_source:
-                    mic_source.stop()
-                if buffer_manager:
-                    buffer_manager.stop()
+        logger.error(f"Error listening to Omi device: {e}")
+    finally:
+        # Clean up device logger on exit
+        if device_logger and device_logger.running:
+            logger.info("Stopping device logger...")
+            await device_logger.stop_logging()
+        
+        if buffer_manager:
+            buffer_manager.stop()
 
 if __name__ == "__main__":
     try:
