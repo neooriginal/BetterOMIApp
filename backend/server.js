@@ -6,6 +6,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const wav = require('wav');
 const OpusEncoder = require('@discordjs/opus').OpusEncoder;
+const { cleanTranscript } = require('./utils/textUtils');
 
 // Load environment variables
 dotenv.config();
@@ -223,25 +224,26 @@ class ClientState {
       
       // Get transcript using Deepgram's preRecorded API
       const transcript = await this.transcribeAudio(wavBuffer);
-      
-      if (transcript && transcript.trim() !== '') {
+      const cleaned = cleanTranscript(transcript);
+
+      if (cleaned && cleaned.trim() !== '') {
         // Increment segments processed
         this.segmentsProcessed++;
-        
+
         // Check for duplicates or similar content
-        if (!this.isDuplicateTranscription(transcript)) {
+        if (!this.isDuplicateTranscription(cleaned)) {
           // Add to buffer if it's not a duplicate
-          this.transcriptionBuffer.push(transcript);
-          this.lastTranscriptionAdded = transcript;
-          this.recentTranscripts.push(transcript);
+          this.transcriptionBuffer.push(cleaned);
+          this.lastTranscriptionAdded = cleaned;
+          this.recentTranscripts.push(cleaned);
           if (this.recentTranscripts.length > this.maxRecentTranscripts) {
             this.recentTranscripts.shift();
           }
-          
+
           // Send transcript back to client without logging the full text
           if (this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ 
-              transcript: transcript, 
+            this.ws.send(JSON.stringify({
+              transcript: cleaned,
               client_id: this.id,
               timestamp: new Date().toISOString()
             }));
@@ -269,14 +271,16 @@ class ClientState {
       return true;
     }
 
+    const cleaned = cleanTranscript(transcript);
+
     // Check against the most recent transcript
-    if (this.lastTranscriptionAdded && this.calculateSimilarity(transcript, this.lastTranscriptionAdded) > 0.85) {
+    if (this.lastTranscriptionAdded && this.calculateSimilarity(cleaned, this.lastTranscriptionAdded) > 0.85) {
       return true;
     }
 
     // Check against a small history of recent transcripts
     for (const recent of this.recentTranscripts) {
-      if (this.calculateSimilarity(transcript, recent) > 0.85) {
+      if (this.calculateSimilarity(cleaned, recent) > 0.85) {
         return true;
       }
     }
