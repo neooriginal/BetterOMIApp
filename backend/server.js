@@ -154,7 +154,7 @@ class ClientState {
     this.transcriptionBuffer = [];
     this.lastTranscriptionAdded = "";
     this.recentTranscripts = [];
-    this.maxRecentTranscripts = 5;
+    this.maxRecentTranscripts = 10; // keep a larger history to catch repeats
     this.lastActivityTime = Date.now();
     this.processingTimeout = null;
     this.segmentsProcessed = 0;
@@ -270,13 +270,13 @@ class ClientState {
     }
 
     // Check against the most recent transcript
-    if (this.lastTranscriptionAdded && this.calculateSimilarity(transcript, this.lastTranscriptionAdded) > 0.8) {
+    if (this.lastTranscriptionAdded && this.calculateSimilarity(transcript, this.lastTranscriptionAdded) > 0.85) {
       return true;
     }
 
     // Check against a small history of recent transcripts
     for (const recent of this.recentTranscripts) {
-      if (this.calculateSimilarity(transcript, recent) > 0.8) {
+      if (this.calculateSimilarity(transcript, recent) > 0.85) {
         return true;
       }
     }
@@ -372,19 +372,18 @@ class ClientState {
     }
   }
 
-  async transcribeAudio(wavBuffer) {
+  async transcribeAudio(wavBuffer, attempt = 1) {
+    const MAX_ATTEMPTS = 3;
     try {
-      // Use Deepgram's API for pre-recorded audio
       const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
       if (!DEEPGRAM_API_KEY) {
         console.error('DEEPGRAM_API_KEY not set. Skipping transcription.');
         return '';
       }
-      
-      // Use axios to make a direct API call
+
       const axios = require('axios');
       const response = await axios.post(
-        'https://api.deepgram.com/v1/listen', 
+        'https://api.deepgram.com/v1/listen',
         wavBuffer,
         {
           headers: {
@@ -398,15 +397,18 @@ class ClientState {
           }
         }
       );
-      
-      // Extract transcript from the response
+
       if (response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript) {
         return response.data.results.channels[0].alternatives[0].transcript;
       }
-      
       return '';
     } catch (error) {
-      console.error('Deepgram transcription failed:', error.message);
+      console.error(`Deepgram transcription failed (attempt ${attempt}):`, error.message);
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = 500 * Math.pow(2, attempt - 1);
+        await new Promise(res => setTimeout(res, delay));
+        return this.transcribeAudio(wavBuffer, attempt + 1);
+      }
       return '';
     }
   }
