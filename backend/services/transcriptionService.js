@@ -27,9 +27,9 @@ async function createTranscription(text, session_id, expirationDays = 14, memory
       'INSERT INTO transcriptions (text, session_id, memory_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
       [text, session_id, memory_id, created_at, expires_at]
     );
-    
+
     return {
-      id: result.lastID,
+      id: result.id,
       text,
       session_id,
       memory_id,
