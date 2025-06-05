@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const LAST_CONNECTED_DEVICE_ID_KEY = 'LAST_CONNECTED_DEVICE_ID';
 const WEBSOCKET_URL_KEY = 'WEBSOCKET_URL_KEY';
 const DEEPGRAM_API_KEY_KEY = 'DEEPGRAM_API_KEY_KEY';
+const AUTO_START_STREAMING_KEY = 'AUTO_START_STREAMING_KEY';
 
 export const saveLastConnectedDeviceId = async (deviceId: string | null): Promise<void> => {
   try {
@@ -80,5 +81,27 @@ export const getDeepgramApiKey = async (): Promise<string | null> => {
   } catch (error) {
     console.error('[Storage] Error retrieving Deepgram API Key:', error);
     return null;
+  }
+};
+
+// Auto-start streaming setting
+export const saveAutoStartStreaming = async (enabled: boolean): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(AUTO_START_STREAMING_KEY, String(enabled));
+    console.log('[Storage] Auto-start streaming setting saved:', enabled);
+  } catch (error) {
+    console.error('[Storage] Error saving auto-start streaming setting:', error);
+  }
+};
+
+export const getAutoStartStreaming = async (): Promise<boolean> => {
+  try {
+    const value = await AsyncStorage.getItem(AUTO_START_STREAMING_KEY);
+    const enabled = value === 'true';
+    console.log('[Storage] Retrieved auto-start streaming setting:', enabled);
+    return enabled;
+  } catch (error) {
+    console.error('[Storage] Error retrieving auto-start streaming setting:', error);
+    return false; // Default to false if error or not set
   }
 }; 

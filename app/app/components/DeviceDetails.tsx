@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView, Switch } from 'react-native';
 import { BleAudioCodec } from 'friend-lite-react-native';
 
 interface DeviceDetailsProps {
@@ -16,10 +16,18 @@ interface DeviceDetailsProps {
   onStopAudioListener: () => void;
   audioPacketsReceived: number;
 
+  // WebSocket URL for custom backend
+  webSocketUrl: string;
+  onSetWebSocketUrl: (url: string) => void;
+
   // Custom Audio Streamer Status
   isAudioStreaming: boolean;
   isConnectingAudioStreamer: boolean;
   audioStreamerError: string | null;
+  
+  // Auto-start streaming setting
+  autoStartStreaming: boolean;
+  onToggleAutoStart: (enabled: boolean) => void;
 }
 
 export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
@@ -32,9 +40,13 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
   onStartAudioListener,
   onStopAudioListener,
   audioPacketsReceived,
+  webSocketUrl,
+  onSetWebSocketUrl,
   isAudioStreaming,
   isConnectingAudioStreamer,
-  audioStreamerError
+  audioStreamerError,
+  autoStartStreaming,
+  onToggleAutoStart
 }) => {
   // Blinking indicator state
   const [isBlinking, setIsBlinking] = useState(false);
@@ -62,6 +74,14 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Device Functions</Text>
+
+      {/* Audio Codec */}
+      {currentCodec && (
+        <View style={styles.infoContainerSM}>
+          <Text style={styles.infoTitle}>Current Audio Codec:</Text>
+          <Text style={styles.infoValue}>{currentCodec}</Text>
+        </View>
+      )}
 
       {/* Audio Controls */}
       <View style={styles.subSection}>
@@ -111,6 +131,18 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
           autoCorrect={false}
           editable={!isListeningAudio && !isAudioStreaming} // Prevent edit while listening/streaming
         />
+        
+        {/* Auto-start streaming toggle */}
+        <View style={styles.settingRow}>
+          <Text style={styles.settingLabel}>Auto-start streaming on connect:</Text>
+          <Switch
+            trackColor={{ false: "#767577", true: "#81b0ff" }}
+            thumbColor={autoStartStreaming ? "#4CD964" : "#f4f3f4"}
+            ios_backgroundColor="#3e3e3e"
+            onValueChange={onToggleAutoStart}
+            value={autoStartStreaming}
+          />
+        </View>
 
         {/* Display Streamer Status */}
         {isConnectingAudioStreamer && (
@@ -290,6 +322,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#555',
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  settingLabel: {
+    fontSize: 14,
+    color: '#333',
+    marginRight: 10,
+    fontWeight: '500',
   },
 });
 

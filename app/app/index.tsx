@@ -12,16 +12,18 @@ import {
   getLastConnectedDeviceId,
   saveWebSocketUrl,
   getWebSocketUrl,
+  getAutoStartStreaming,
+  saveAutoStartStreaming,
 } from './utils/storage';
 import { useAudioListener } from './hooks/useAudioListener';
 import { useAudioStreamer } from './hooks/useAudioStreamer';
+import { checkAndRequestBatteryOptimization } from './utils/BatteryOptimizationHelper';
 
 // Components
 import BluetoothStatusBanner from './components/BluetoothStatusBanner';
 import ScanControls from './components/ScanControls';
 import DeviceListItem from './components/DeviceListItem';
 import DeviceDetails from './components/DeviceDetails';
-import Settings from './components/Settings';
 
 export default function App() {
   // Initialize OmiConnection
@@ -35,6 +37,9 @@ export default function App() {
   
   // Refs to hold device connection methods
   const getAudioCodecRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  
+  // Ref to track if we already attempted to auto-start audio for this connection
+  const didAttemptAutoStartRef = useRef<boolean>(false);
 
   // State for remembering the last connected device
   const [lastKnownDeviceId, setLastKnownDeviceId] = useState<string | null>(null);
@@ -43,6 +48,9 @@ export default function App() {
 
   // State for WebSocket URL for custom audio streaming
   const [webSocketUrl, setWebSocketUrl] = useState<string>('wss://betteromi.com/ws/audio');
+  
+  // State for auto-start streaming
+  const [autoStartStreaming, setAutoStartStreaming] = useState<boolean>(false);
   
   // Bluetooth Management Hook
   const {
@@ -92,8 +100,7 @@ export default function App() {
     } else {
       console.warn('[App.tsx] onDeviceConnect: Could not determine connected device ID to save. omiConnection.connectedDeviceId was null/undefined.');
     }
-    // Actions on connect (e.g., auto-fetch codec/battery)
-  }, [omiConnection]); // saveLastConnectedDeviceId is stable, omiConnection is stable ref
+  }, [omiConnection]);
 
   const onDeviceDisconnect = useCallback(async () => {
     console.log('[App.tsx] Device disconnected callback.');
@@ -105,7 +112,8 @@ export default function App() {
       console.log('[App.tsx] Disconnect: Stopping custom audio streaming.');
       audioStreamer.stopStreaming();
     }
-  }, [originalStopAudioListener, audioStreamer.stopStreaming]);
+    // Reset the auto-start flag when device disconnects
+    didAttemptAutoStartRef.current = false;  }, [originalStopAudioListener, audioStreamer.stopStreaming]);
 
   // Initialize Device Connection hook, passing the memoized callbacks
   const deviceConnection = useDeviceConnection(
@@ -137,8 +145,23 @@ export default function App() {
         console.log('[App.tsx] No WebSocket URL in storage, saving default URL');
         await saveWebSocketUrl(webSocketUrl);
       }
+      
+      // Load auto-start streaming setting
+      const autoStart = await getAutoStartStreaming();
+      console.log('[App.tsx] Loaded auto-start streaming setting:', autoStart);
+      setAutoStartStreaming(autoStart);
     };
     loadSettings();
+  }, [webSocketUrl]);
+
+  // Request battery optimization permission on app startup (Android only)
+  useEffect(() => {
+    // Wait a short moment to avoid overwhelming the user with permission prompts at startup
+    const timer = setTimeout(() => {
+      checkAndRequestBatteryOptimization();
+    }, 2000);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   // Now that deviceConnection is available, we can define the more specific isAudioReadyToListen
@@ -185,7 +208,11 @@ export default function App() {
         try {
           // useDeviceConnection.connectToDevice can take a device ID string directly
           await deviceConnection.connectToDevice(lastKnownDeviceId);
+          // If connectToDevice throws, catch block handles it.
+          // If it resolves, the connection attempt was made.
+          // The onDeviceConnect callback will be triggered if successful.
           console.log(`[App.tsx] Auto-reconnect attempt initiated for ${lastKnownDeviceId}. Waiting for connection event.`);
+          // Removed the if(success) block as connectToDevice is void
         } catch (error) {
           console.error(`[App.tsx] Error auto-reconnecting to ${lastKnownDeviceId}:`, error);
           // Clear the problematic device ID from storage and state
@@ -210,15 +237,17 @@ export default function App() {
     deviceConnection.connectToDevice, // Stable function from the hook
     triedAutoReconnectForCurrentId,
     isAttemptingAutoReconnect, // Added to prevent re-triggering while one is in progress
+    // Added saveLastConnectedDeviceId and setLastKnownDeviceId to dependency array if they were not already implicitly covered
+    // saveLastConnectedDeviceId is an import, setLastKnownDeviceId is a state setter - typically stable
   ]);
 
   const handleStartAudioListeningAndStreaming = useCallback(async () => {
     if (!webSocketUrl || webSocketUrl.trim() === '') {
-      console.log('[App.tsx] WebSocket URL missing');
+      Alert.alert('WebSocket URL Required', 'Please enter the WebSocket URL for streaming.');
       return;
     }
     if (!omiConnection.isConnected() || !deviceConnection.connectedDeviceId) {
-      console.log('[App.tsx] Device not connected, can\'t start audio streaming');
+      Alert.alert('Device Not Connected', 'Please connect to an OMI device first.');
       return;
     }
     
@@ -239,6 +268,8 @@ export default function App() {
         } catch (error) {
           console.error('[App.tsx] Error adding audio listener to existing WebSocket:', error);
         }
+      } else {
+        Alert.alert('Info', 'Audio streaming is already active or connecting.');
       }
       return;
     }
@@ -256,6 +287,7 @@ export default function App() {
       });
     } catch (error) {
       console.error('[App.tsx] Error starting audio listening/streaming:', error);
+      Alert.alert('Error', 'Could not start audio listening or streaming.');
       // Ensure cleanup if one part started but the other failed
       if (audioStreamer.isStreaming) audioStreamer.stopStreaming();
     }
@@ -328,6 +360,12 @@ export default function App() {
     await saveWebSocketUrl(url);
   }, []);
 
+  const handleToggleAutoStart = useCallback(async (enabled: boolean) => {
+    setAutoStartStreaming(enabled);
+    await saveAutoStartStreaming(enabled);
+    console.log('[App.tsx] Auto-start streaming setting changed to:', enabled);
+  }, []);
+
   const handleCancelAutoReconnect = useCallback(async () => {
     console.log('[App.tsx] Cancelling auto-reconnection attempt.');
     if (lastKnownDeviceId) {
@@ -387,25 +425,87 @@ export default function App() {
 
   // Effect to auto-start audio listener and get codec when device connects
   useEffect(() => {
-    // Only run this effect when a device connects
-    if (deviceConnection.connectedDeviceId && omiConnection.isConnected()) {
+    // Only run this effect when a device connects and we haven't attempted auto-start yet for this session
+    if (deviceConnection.connectedDeviceId && omiConnection.isConnected() && !didAttemptAutoStartRef.current) {
       console.log('[App.tsx] Device connected, auto-fetching codec');
+      
+      // Mark that we've attempted auto-start for this connection session
+      didAttemptAutoStartRef.current = true;
       
       // Auto fetch audio codec
       deviceConnection.getAudioCodec().catch(err => 
         console.error('[App.tsx] Error auto-fetching audio codec:', err)
       );
+      
+      // Only auto-start audio listener if the setting is enabled
+      if (autoStartStreaming) {
+        console.log('[App.tsx] Auto-start streaming is enabled, starting audio listener');
+        
+        // Auto start audio listener if we have a websocket URL
+        const startAudioWithStoredUrl = async () => {
+          try {
+            const storedWebSocketUrl = await getWebSocketUrl();
+            if (storedWebSocketUrl && storedWebSocketUrl.trim() !== '') {
+              console.log('[App.tsx] Auto-starting audio listener with stored WebSocket URL:', storedWebSocketUrl);
+              
+              // Set the state with the stored URL
+              setWebSocketUrl(storedWebSocketUrl);
+              
+              // Only start if not already listening and not already streaming
+              if (!isOmiAudioListenerActive && !audioStreamer.isStreaming && !audioStreamer.isConnecting) {
+                // Start custom WebSocket streaming first
+                await audioStreamer.startStreaming(storedWebSocketUrl);
+                
+                // Then start OMI audio listener
+                await originalStartAudioListener((audioBytes) => {
+                  const wsReadyState = audioStreamer.getWebSocketReadyState();
+                  if (wsReadyState === WebSocket.OPEN && audioBytes.length > 0) {
+                    audioStreamer.sendAudio(audioBytes);
+                  }
+                });
+                console.log('[App.tsx] Auto-started audio listener successfully');
+              } else {
+                console.log('[App.tsx] Audio listener or WebSocket already active, skipping auto-start');
+              }
+            } else {
+              console.log('[App.tsx] No WebSocket URL found in storage, skipping auto-start of audio listener');
+            }
+          } catch (error) {
+            console.error('[App.tsx] Error auto-starting audio listener:', error);
+          }
+        };
+        
+        startAudioWithStoredUrl();
+      } else {
+        console.log('[App.tsx] Auto-start streaming is disabled, skipping audio listener start');
+      }
     }
-  }, [deviceConnection.connectedDeviceId, omiConnection, deviceConnection.getAudioCodec]);
+  }, [deviceConnection.connectedDeviceId, omiConnection, autoStartStreaming]);
 
   if (isPermissionsLoading && bluetoothState === BluetoothState.Unknown) {
     return (
       <View style={styles.centeredMessageContainer}>
         <ActivityIndicator size="large" />
         <Text style={styles.centeredMessageText}>
-          Initializing Bluetooth...
+          {isAttemptingAutoReconnect 
+            ? `Attempting to reconnect to the last device (${lastKnownDeviceId ? lastKnownDeviceId.substring(0, 10) + '...' : ''})...` 
+            : 'Initializing Bluetooth...'}
         </Text>
       </View>
+    );
+  }
+
+  if (isAttemptingAutoReconnect) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centeredMessageContainer}>
+          <ActivityIndicator size="large" />
+          <Text style={styles.centeredMessageText}>
+            Attempting to reconnect to the last device ({lastKnownDeviceId ? lastKnownDeviceId.substring(0, 10) + '...' : ''})...
+          </Text>
+          <Button title="Cancel" onPress={handleCancelAutoReconnect} color="#FF6347" />
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -421,7 +521,7 @@ export default function App() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>BetterOMI</Text>
+            <Text style={styles.title}>Friend Lite</Text>
             {deviceConnection.connectedDeviceId && deviceConnection.batteryLevel >= 0 && (
               <View style={styles.batteryIndicator}>
                 <View style={[styles.batteryLevel, { width: `${deviceConnection.batteryLevel}%` }]} />
@@ -437,18 +537,28 @@ export default function App() {
             onRequestPermission={requestBluetoothPermission}
           />
 
-          {!deviceConnection.connectedDeviceId && (
-            <ScanControls
-              scanning={scanning}
-              onScanPress={startScan}
-              onStopScanPress={stopDeviceScanAction}
-              canScan={canScan}
-            />
-          )}
+          <ScanControls
+            scanning={scanning}
+            onScanPress={startScan}
+            onStopScanPress={stopDeviceScanAction}
+            canScan={canScan}
+          />
 
           {filteredDevices.length > 0 && !deviceConnection.connectedDeviceId && !isAttemptingAutoReconnect && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Found Devices</Text>
+              <View style={styles.sectionHeaderWithFilter}>
+                <Text style={styles.sectionTitle}>Found Devices</Text>
+                <View style={styles.filterContainer}>
+                  <Text style={styles.filterText}>Show only OMI/Friend</Text>
+                  <Switch
+                    trackColor={{ false: "#767577", true: "#81b0ff" }}
+                    thumbColor={showOnlyOmi ? "#f5dd4b" : "#f4f3f4"}
+                    ios_backgroundColor="#3e3e3e"
+                    onValueChange={setShowOnlyOmi}
+                    value={showOnlyOmi}
+                  />
+                </View>
+              </View>
               <FlatList
                 data={filteredDevices}
                 renderItem={({ item }) => (
@@ -539,19 +649,15 @@ export default function App() {
               onStartAudioListener={handleStartAudioListeningAndStreaming}
               onStopAudioListener={handleStopAudioListeningAndStreaming}
               audioPacketsReceived={audioPacketsReceived}
+              webSocketUrl={webSocketUrl}
+              onSetWebSocketUrl={handleSetAndSaveWebSocketUrl}
               isAudioStreaming={audioStreamer.isStreaming}
               isConnectingAudioStreamer={audioStreamer.isConnecting}
               audioStreamerError={audioStreamer.error}
+              autoStartStreaming={autoStartStreaming}
+              onToggleAutoStart={handleToggleAutoStart}
             />
           )}
-          
-          <Settings
-            webSocketUrl={webSocketUrl}
-            onSetWebSocketUrl={handleSetAndSaveWebSocketUrl}
-            isEditable={!isOmiAudioListenerActive && !audioStreamer.isStreaming}
-            showOnlyOmi={showOnlyOmi}
-            setShowOnlyOmi={setShowOnlyOmi}
-          />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -679,4 +785,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
