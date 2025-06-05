@@ -153,6 +153,8 @@ class ClientState {
     // Buffering for transcriptions
     this.transcriptionBuffer = [];
     this.lastTranscriptionAdded = "";
+    this.recentTranscripts = [];
+    this.maxRecentTranscripts = 5;
     this.lastActivityTime = Date.now();
     this.processingTimeout = null;
     this.segmentsProcessed = 0;
@@ -231,6 +233,10 @@ class ClientState {
           // Add to buffer if it's not a duplicate
           this.transcriptionBuffer.push(transcript);
           this.lastTranscriptionAdded = transcript;
+          this.recentTranscripts.push(transcript);
+          if (this.recentTranscripts.length > this.maxRecentTranscripts) {
+            this.recentTranscripts.shift();
+          }
           
           // Send transcript back to client without logging the full text
           if (this.ws.readyState === WebSocket.OPEN) {
@@ -259,16 +265,22 @@ class ClientState {
   
   // Check if a transcription is a duplicate or very similar to recently added ones
   isDuplicateTranscription(transcript) {
-    // Simple duplicate check
-    if (this.lastTranscriptionAdded === transcript) {
+    if (!transcript) {
       return true;
     }
-    
-    // Calculate similarity with last added transcription
-    if (this.lastTranscriptionAdded && this.calculateSimilarity(transcript, this.lastTranscriptionAdded) > 0.7) {
+
+    // Check against the most recent transcript
+    if (this.lastTranscriptionAdded && this.calculateSimilarity(transcript, this.lastTranscriptionAdded) > 0.8) {
       return true;
     }
-    
+
+    // Check against a small history of recent transcripts
+    for (const recent of this.recentTranscripts) {
+      if (this.calculateSimilarity(transcript, recent) > 0.8) {
+        return true;
+      }
+    }
+
     return false;
   }
   
