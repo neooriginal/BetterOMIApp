@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "wav": "^1.0.2"
+  }
+}

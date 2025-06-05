@@ -264,4 +264,47 @@ router.delete('/:sessionId', (req, res) => {
   });
 });
 
+/**
+ * Endpoint to receive battery level data from Omi device
+ */
+router.post('/battery', async (req, res) => {
+  try {
+    const { batteryLevel, sessionId } = req.body;
+    
+    if (batteryLevel === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Battery level is required'
+      });
+    }
+    
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required'
+      });
+    }
+
+    console.log(`Received battery level for session ${sessionId}: ${batteryLevel}%`);
+    
+    // Here you could add logic to store battery levels in database
+    // or trigger alerts on low battery if needed
+    
+    // Return success response
+    res.json({
+      success: true,
+      message: 'Battery data received'
+    });
+    
+  } catch (error) {
+    console.error('Error processing battery data:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error processing battery data',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router; 

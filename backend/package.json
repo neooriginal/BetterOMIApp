@@ -20,13 +20,17 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@deepgram/sdk": "^4.2.0",
+    "@discordjs/opus": "^0.10.0",
     "axios": "^1.6.3",
     "body-parser": "^1.20.2",
     "dotenv": "^16.0.3",
     "ejs": "^3.1.9",
     "express": "^4.18.2",
     "openai": "^4.0.0",
+    "opusscript": "^0.1.1",
     "sqlite3": "^5.1.6",
+    "wav": "^1.0.2",
     "ws": "^8.15.0"
   },
   "devDependencies": {
