@@ -34,8 +34,8 @@ const basicAuth = (req, res, next) => {
   
   // Check if environment variables are set
   if (!validUsername || !validPassword) {
-    console.error('Basic authentication credentials not set in .env file');
-    return next(); // Skip auth if credentials not set
+    console.error('Basic authentication credentials not set in environment variables');
+    return res.status(500).send('Authentication not configured');
   }
   
   // Validate credentials
