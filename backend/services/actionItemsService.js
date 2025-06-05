@@ -383,9 +383,10 @@ async function processActionItems(actionItems) {
         if (isDuplicate) {
           console.log(`Skipping duplicate action item: "${item.title}"`);
           continue;
-        };
-        
-        results.push(actionItemData);
+        }
+
+        const createdItem = await createActionItem(actionItemData);
+        results.push(createdItem);
       }
     }
     
