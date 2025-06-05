@@ -7,8 +7,8 @@ const WebSocket = require('ws');
 const wav = require('wav');
 const OpusEncoder = require('@discordjs/opus').OpusEncoder;
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from the repository root
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 // Audio constants
 const SAMPLE_RATE = 16000;

@@ -1,7 +1,8 @@
+const path = require('path');
 const dotenv = require('dotenv');
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from the repository root
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 /**
  * Basic Authentication Middleware
