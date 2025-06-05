@@ -200,8 +200,8 @@ async function checkForDuplicate(memory) {
   try {
     // Check for exact title match or similar content
     const similarMemories = await all(
-      'SELECT * FROM memories WHERE title = ? OR content LIKE ? ORDER BY created_at DESC LIMIT 5',
-      [memory.title, `%${memory.content.substring(0, 50)}%`]
+      'SELECT * FROM memories WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC LIMIT 10',
+      [`%${memory.title}%`, `%${memory.content.substring(0, 50)}%`]
     );
     
     if (!similarMemories || similarMemories.length === 0) {
@@ -215,13 +215,23 @@ async function checkForDuplicate(memory) {
         console.log(`Found duplicate memory with title: ${memory.title}`);
         return true;
       }
-      
+
+      // Fuzzy title match using simple word overlap
+      const titleSimilarity = calculateTitleSimilarity(
+        existingMemory.title.toLowerCase(),
+        memory.title.toLowerCase()
+      );
+      if (titleSimilarity > 0.8) {
+        console.log(`Found similar memory title: "${existingMemory.title}" (${Math.round(titleSimilarity * 100)}% similarity)`);
+        return true;
+      }
+
       // If very similar content (using a simple but effective similarity check)
       const contentSimilarity = calculateSimilarity(
-        existingMemory.content.toLowerCase(), 
+        existingMemory.content.toLowerCase(),
         memory.content.toLowerCase()
       );
-      
+
       if (contentSimilarity > 0.7) { // 70% similarity threshold
         console.log(`Found similar memory: "${existingMemory.title}" with ${Math.round(contentSimilarity * 100)}% content similarity`);
         return true;
@@ -257,6 +267,22 @@ function calculateSimilarity(str1, str2) {
   return intersection.size / union.size;
 }
 
+// Calculate title similarity using word overlap
+function calculateTitleSimilarity(title1, title2) {
+  if (!title1 || !title2) return 0;
+
+  const words1 = title1.split(/\s+/).filter(Boolean);
+  const words2 = title2.split(/\s+/).filter(Boolean);
+
+  let matches = 0;
+  for (const w of words1) {
+    if (words2.includes(w)) matches++;
+  }
+
+  const total = new Set([...words1, ...words2]).size;
+  return matches / total;
+}
+
 /**
  * Process memories from LLM extraction
  * @param {Array} memories - Memories extracted by LLM
@@ -283,12 +309,18 @@ async function processMemories(memories, sessionId) {
           continue;
         }
         
-        // Validate memory content length - ensure it's substantial
+        // Validate memory content length - skip extremely short or very long entries
         const contentWords = item.content.split(/\s+/).length;
-        const minimumWords = item.importance >= 3 ? 200 : 100;
-        
-        if (contentWords < minimumWords) {
-          console.log(`Skipping memory with insufficient content: ${contentWords} words (minimum: ${minimumWords})`);
+        const minWords = 10; // ignore trivial memories
+        const maxWords = item.importance >= 3 ? 200 : 150; // keep high importance memories concise
+
+        if (contentWords < minWords) {
+          console.log(`Skipping memory with too little content: ${contentWords} words (minimum: ${minWords})`);
+          continue;
+        }
+
+        if (contentWords > maxWords) {
+          console.log(`Skipping memory exceeding limit: ${contentWords} words (maximum: ${maxWords})`);
           continue;
         }
         
@@ -400,5 +432,6 @@ module.exports = {
   processMemories,
   searchMemories,
   checkForDuplicate,
-  calculateSimilarity
-}; 
+  calculateSimilarity,
+  calculateTitleSimilarity
+};
