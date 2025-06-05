@@ -1,20 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 
 interface SettingsProps {
   webSocketUrl: string;
   onSetWebSocketUrl: (url: string) => void;
   isEditable: boolean;
-  showOnlyOmi: boolean;
-  setShowOnlyOmi: (value: boolean) => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   webSocketUrl,
   onSetWebSocketUrl,
-  isEditable,
-  showOnlyOmi,
-  setShowOnlyOmi
+  isEditable
 }) => {
   const [localUrl, setLocalUrl] = useState(webSocketUrl);
   const [isEditing, setIsEditing] = useState(false);
@@ -66,16 +62,6 @@ const Settings: React.FC<SettingsProps> = ({
         )}
       </View>
       
-      <View style={styles.settingGroup}>
-        <Text style={styles.settingLabel}>Show only OMI/Friend devices:</Text>
-        <Switch
-          trackColor={{ false: "#767577", true: "#81b0ff" }}
-          thumbColor={showOnlyOmi ? "#f5dd4b" : "#f4f3f4"}
-          ios_backgroundColor="#3e3e3e"
-          onValueChange={setShowOnlyOmi}
-          value={showOnlyOmi}
-        />
-      </View>
     </View>
   );
 };
