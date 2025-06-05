@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, ScrollView, Platform, FlatList, ActivityIndicator, Alert, Switch, Button, TouchableOpacity, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, ScrollView, Platform, FlatList, ActivityIndicator, Alert, Button, TouchableOpacity, KeyboardAvoidingView } from 'react-native';
 import { OmiConnection } from 'friend-lite-react-native'; // OmiDevice also comes from here
 import { State as BluetoothState } from 'react-native-ble-plx'; // Import State from ble-plx
 
@@ -29,8 +29,6 @@ export default function App() {
   // Initialize OmiConnection
   const omiConnection = useRef(new OmiConnection()).current;
 
-  // Filter state
-  const [showOnlyOmi, setShowOnlyOmi] = useState(true);
   
   // Auto refresh battery level interval
   const batteryRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -346,14 +344,11 @@ export default function App() {
   }, [canScan, scanning, startScan]);
 
   const filteredDevices = React.useMemo(() => {
-    if (!showOnlyOmi) {
-      return scannedDevices;
-    }
     return scannedDevices.filter(device => {
       const name = device.name?.toLowerCase() || '';
       return name.includes('omi') || name.includes('friend');
     });
-  }, [scannedDevices, showOnlyOmi]);
+  }, [scannedDevices]);
 
   const handleSetAndSaveWebSocketUrl = useCallback(async (url: string) => {
     setWebSocketUrl(url);
@@ -548,16 +543,6 @@ export default function App() {
             <View style={styles.section}>
               <View style={styles.sectionHeaderWithFilter}>
                 <Text style={styles.sectionTitle}>Found Devices</Text>
-                <View style={styles.filterContainer}>
-                  <Text style={styles.filterText}>Show only OMI/Friend</Text>
-                  <Switch
-                    trackColor={{ false: "#767577", true: "#81b0ff" }}
-                    thumbColor={showOnlyOmi ? "#f5dd4b" : "#f4f3f4"}
-                    ios_backgroundColor="#3e3e3e"
-                    onValueChange={setShowOnlyOmi}
-                    value={showOnlyOmi}
-                  />
-                </View>
               </View>
               <FlatList
                 data={filteredDevices}
@@ -696,15 +681,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 15,
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  filterText: {
-    marginRight: 8,
-    fontSize: 14,
-    color: '#333',
   },
   sectionTitle: {
     fontSize: 18,
