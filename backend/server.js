@@ -33,6 +33,20 @@ app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Import authentication middleware
+const basicAuth = require('./middleware/auth');
+
+// Apply basic authentication to web UI routes only
+// This does not apply to WebSocket connections
+app.use((req, res, next) => {
+  // Skip authentication for WebSocket upgrade requests
+  if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
+    return next();
+  }
+  // Apply authentication to other requests
+  basicAuth(req, res, next);
+});
+
 // Add error handling middleware
 app.use((err, req, res, next) => {
   console.error('Express error:', err);
