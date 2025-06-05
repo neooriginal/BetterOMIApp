@@ -369,4 +369,6 @@ module.exports = {
   processMemories,
   searchMemories,
   checkForDuplicate,
-}; 
+  calculateSimilarity,
+  calculateTitleSimilarity
+};
