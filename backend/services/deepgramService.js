@@ -40,6 +40,9 @@ const HEARTBEAT_INTERVAL = 10000;
 // Heartbeat intervals for each connection
 const heartbeatIntervals = new Map();
 
+// Track last detected speaker for each session
+const lastSpeakers = new Map();
+
 // Inactivity threshold in milliseconds (3 minutes of silence)
 const TRANSCRIPTION_INACTIVITY_THRESHOLD = 3 * 60 * 1000;
 
@@ -254,11 +257,16 @@ function createDeepgramConnection(sessionId) {
       ws.on('close', (code, reason) => {
         console.log(`Deepgram connection closed for session ${sessionId}: Code: ${code}, Reason: ${reason}`);
         activeConnections.delete(sessionId);
-        
+
         // Clean up heartbeat interval
         if (heartbeatIntervals.has(sessionId)) {
           clearInterval(heartbeatIntervals.get(sessionId));
           heartbeatIntervals.delete(sessionId);
+        }
+
+        // Remove last speaker tracking for this session
+        if (lastSpeakers.has(sessionId)) {
+          lastSpeakers.delete(sessionId);
         }
       });
       
@@ -278,12 +286,21 @@ function createDeepgramConnection(sessionId) {
 function bufferTranscription(text, sessionId, speaker = null) {
   // Get or create buffer for this session
   let buffer = transcriptionBuffers.get(sessionId) || '';
-  
-  // Append text to buffer (with space if buffer not empty)
-  if (buffer.length > 0) {
-    buffer += ' ' + text.trim();
+  const lastSpeaker = lastSpeakers.get(sessionId);
+
+  if (speaker !== null) {
+    if (speaker !== lastSpeaker) {
+      if (buffer.length > 0) {
+        buffer += '\n';
+      }
+      buffer += `Speaker ${speaker}: ${text.trim()}`;
+    } else {
+      buffer += (buffer.length > 0 ? ' ' : '') + text.trim();
+    }
+    lastSpeakers.set(sessionId, speaker);
   } else {
-    buffer += text.trim();
+    // No speaker info available
+    buffer += (buffer.length > 0 ? ' ' : '') + text.trim();
   }
   
   // Update buffer in storage
@@ -326,10 +343,11 @@ async function processBufferedTranscription(sessionId) {
     
     // Send to stream processor
     await sendTranscriptToStream(buffer, sessionId);
-    
+
     // Clear buffer
     transcriptionBuffers.delete(sessionId);
-    
+    lastSpeakers.delete(sessionId);
+
     console.log(`Successfully processed transcription for session ${sessionId}`);
   } catch (error) {
     console.error(`Error processing transcription for session ${sessionId}:`, error);
