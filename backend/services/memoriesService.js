@@ -351,13 +351,33 @@ async function processMemories(memories, sessionId, transcriptionId = null) {
 async function searchMemories(searchTerm) {
   try {
     return await all(
-      'SELECT * FROM memories WHERE title LIKE ? OR content LIKE ? ORDER BY importance DESC', 
+      'SELECT * FROM memories WHERE title LIKE ? OR content LIKE ? ORDER BY importance DESC',
       [`%${searchTerm}%`, `%${searchTerm}%`]
     );
   } catch (error) {
     console.error('Error searching memories:', error);
     throw error;
   }
+}
+
+/**
+ * Calculate similarity between two memory titles.
+ * This normalizes both titles and then applies the generic
+ * `calculateSimilarity` helper from textUtils.
+ *
+ * @param {string} titleA - First memory title
+ * @param {string} titleB - Second memory title
+ * @returns {number} Similarity score between 0 and 1
+ */
+function calculateTitleSimilarity(titleA, titleB) {
+  if (!titleA || !titleB) {
+    return 0;
+  }
+
+  const normalizedA = normalizeText(titleA);
+  const normalizedB = normalizeText(titleB);
+
+  return calculateSimilarity(normalizedA, normalizedB);
 }
 
 module.exports = {
