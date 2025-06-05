@@ -1,4 +1,5 @@
 const { run, get, all } = require('../models/database');
+const { calculateSimilarity, normalizeText } = require('../utils/textUtils');
 
 /**
  * Create a new action item
@@ -9,15 +10,18 @@ async function createActionItem(actionItem) {
   try {
     const { title, description, due_date, priority = 1, expires_at } = actionItem;
     
+    const normalizedTitle = normalizeText(title);
+    const normalizedDescription = normalizeText(description);
+
     const result = await run(
       'INSERT INTO action_items (title, description, due_date, priority, expires_at) VALUES (?, ?, ?, ?, ?)',
-      [title, description, due_date, priority, expires_at]
+      [normalizedTitle, normalizedDescription, due_date, priority, expires_at]
     );
     
     return {
       id: result.id,
-      title,
-      description,
+      title: normalizedTitle,
+      description: normalizedDescription,
       due_date,
       priority,
       status: 'pending',
@@ -174,31 +178,25 @@ async function completeActionItem(id) {
  */
 async function checkForDuplicateActionItem(actionItem) {
   try {
-    // Look for action items with the same title or very similar titles
-    // Limit to pending items only so completed ones can be recreated
-    const similarActionItems = await all(
-      'SELECT * FROM action_items WHERE status = "pending" AND title = ? ORDER BY created_at DESC LIMIT 3',
-      [actionItem.title]
+    // Look for recent pending action items to check against.
+    const recentActionItems = await all(
+      'SELECT * FROM action_items WHERE status = "pending" ORDER BY created_at DESC LIMIT 15'
     );
-    
-    if (similarActionItems && similarActionItems.length > 0) {
-      console.log(`Found ${similarActionItems.length} potential duplicate action items with title: ${actionItem.title}`);
-      return true;
+
+    if (!recentActionItems || recentActionItems.length === 0) {
+      return false;
     }
-    
-    // Also check for fuzzy matches on title to catch slight variations
-    const fuzzyMatches = await all(
-      'SELECT * FROM action_items WHERE status = "pending" ORDER BY created_at DESC LIMIT 20'
-    );
-    
+
+    const normalizedTitle = normalizeText(actionItem.title);
+
     // Use a title similarity check on recent items
-    for (const existingItem of fuzzyMatches) {
-      const titleSimilarity = calculateTitleSimilarity(
-        existingItem.title.toLowerCase(),
-        actionItem.title.toLowerCase()
+    for (const existingItem of recentActionItems) {
+      const titleSimilarity = calculateSimilarity(
+        normalizeText(existingItem.title),
+        normalizedTitle
       );
       
-      if (titleSimilarity > 0.8) { // 80% similarity threshold for titles
+      if (titleSimilarity > 0.85) { // 85% similarity threshold for titles
         console.log(`Found similar action item: "${existingItem.title}" with ${Math.round(titleSimilarity * 100)}% title similarity`);
         return true;
       }
@@ -209,33 +207,6 @@ async function checkForDuplicateActionItem(actionItem) {
     console.error('Error checking for duplicate action item:', error);
     return false; // Proceed with creation in case of error
   }
-}
-
-/**
- * Calculate title similarity using a simple approach
- * @param {string} title1 - First title
- * @param {string} title2 - Second title
- * @returns {number} - Similarity ratio between 0 and 1
- */
-function calculateTitleSimilarity(title1, title2) {
-  if (!title1 || !title2) return 0;
-  
-  // Use a simple word-based approach for titles
-  const words1 = title1.split(/\s+/).filter(Boolean);
-  const words2 = title2.split(/\s+/).filter(Boolean);
-  
-  // Count matching words
-  let matchCount = 0;
-  for (const word of words1) {
-    if (words2.includes(word)) {
-      matchCount++;
-    }
-  }
-  
-  // Calculate similarity as a ratio of matching words to total unique words
-  const totalUniqueWords = new Set([...words1, ...words2]).size;
-  
-  return matchCount / totalUniqueWords;
 }
 
 /**
@@ -251,8 +222,9 @@ async function processActionItems(actionItems) {
       console.log(`Processing ${actionItems.length} extracted action items`);
       
       for (const item of actionItems) {
+        const normalizedTitle = normalizeText(item.title);
         // Skip empty items
-        if (!item.title || item.title.trim() === '') {
+        if (!normalizedTitle || normalizedTitle.trim() === '') {
           continue;
         }
         
@@ -271,7 +243,7 @@ async function processActionItems(actionItems) {
               
               // Set expiration to 7 days after due date
               const expiration = new Date(parsedDate);
-              expiration.setDate(expiration.getDate() + 7);
+              expiration.setDate(parsedDate.getDate() + 7);
               expiresAt = expiration.toISOString();
             } else {
               // Handle natural language date references
@@ -372,8 +344,8 @@ async function processActionItems(actionItems) {
         
         // Check for duplicates before creating
         const actionItemData = {
-          title: item.title,
-          description: item.description || '',
+          title: normalizedTitle,
+          description: normalizeText(item.description) || '',
           due_date: dueDate,
           priority: item.priority || 3, // Default to medium priority if not specified,
           expires_at: expiresAt
@@ -406,5 +378,4 @@ module.exports = {
   completeActionItem,
   processActionItems,
   checkForDuplicateActionItem,
-  calculateTitleSimilarity
 }; 

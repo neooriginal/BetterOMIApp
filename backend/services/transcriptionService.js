@@ -1,4 +1,5 @@
 const { run, get, all } = require('../models/database');
+const { normalizeText } = require('../utils/textUtils');
 
 /**
  * Create a new transcription
@@ -10,8 +11,9 @@ const { run, get, all } = require('../models/database');
  */
 async function createTranscription(text, session_id, expirationDays = 14, memory_id = null) {
   try {
-    if (!text || text.trim() === '') {
-      throw new Error('Transcription text cannot be empty');
+    const normalizedText = normalizeText(text);
+    if (!normalizedText || normalizedText.trim() === '') {
+      throw new Error('Transcription text cannot be empty after normalization');
     }
     
     // Calculate expiration date
@@ -21,16 +23,16 @@ async function createTranscription(text, session_id, expirationDays = 14, memory
     
     const created_at = new Date().toISOString();
     
-    console.log(`Creating transcription: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}" for session ${session_id}`);
+    console.log(`Creating transcription: "${normalizedText.substring(0, 50)}${normalizedText.length > 50 ? '...' : ''}" for session ${session_id}`);
     
     const result = await run(
       'INSERT INTO transcriptions (text, session_id, memory_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
-      [text, session_id, memory_id, created_at, expires_at]
+      [normalizedText, session_id, memory_id, created_at, expires_at]
     );
 
     return {
       id: result.id,
-      text,
+      text: normalizedText,
       session_id,
       memory_id,
       created_at,

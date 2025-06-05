@@ -1,5 +1,6 @@
 const { run, get, all } = require('../models/database');
 const transcriptionService = require('./transcriptionService');
+const { calculateSimilarity, normalizeText } = require('../utils/textUtils');
 
 /**
  * Create a new memory
@@ -18,19 +19,23 @@ async function createMemory(memory) {
       expires_at = null 
     } = memory;
     
+    // Normalize text fields for consistency
+    const normalizedTitle = normalizeText(title);
+    const normalizedContent = normalizeText(content);
+    
     // Convert arrays to JSON strings for storage
     const participantsJson = participants ? JSON.stringify(participants) : null;
     const keyPointsJson = key_points ? JSON.stringify(key_points) : null;
     
     const result = await run(
       'INSERT INTO memories (title, content, context, participants, key_points, importance, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [title, content, context, participantsJson, keyPointsJson, importance, expires_at]
+      [normalizedTitle, normalizedContent, context, participantsJson, keyPointsJson, importance, expires_at]
     );
     
     return {
       id: result.id,
-      title,
-      content,
+      title: normalizedTitle,
+      content: normalizedContent,
       context,
       participants,
       key_points,
@@ -198,32 +203,34 @@ async function deleteMemory(id) {
  */
 async function checkForDuplicate(memory) {
   try {
-    // Check for exact title match or similar content
-    const similarMemories = await all(
-      'SELECT * FROM memories WHERE title = ? OR content LIKE ? ORDER BY created_at DESC LIMIT 5',
-      [memory.title, `%${memory.content.substring(0, 50)}%`]
+    // Get recent memories to check against for performance reasons
+    const recentMemories = await all(
+      'SELECT * FROM memories ORDER BY created_at DESC LIMIT 20'
     );
     
-    if (!similarMemories || similarMemories.length === 0) {
-      return false; // No similar memories found
+    if (!recentMemories || recentMemories.length === 0) {
+      return false;
     }
     
-    // Check for high similarity with existing memories
-    for (const existingMemory of similarMemories) {
-      // If exact title match
-      if (existingMemory.title === memory.title) {
-        console.log(`Found duplicate memory with title: ${memory.title}`);
-        return true;
-      }
-      
-      // If very similar content (using a simple but effective similarity check)
+    // Normalize new memory content for comparison
+    const normalizedTitle = normalizeText(memory.title);
+    const normalizedContent = normalizeText(memory.content);
+
+    // Check for high similarity with recent memories
+    for (const existingMemory of recentMemories) {
+      const titleSimilarity = calculateSimilarity(
+        normalizeText(existingMemory.title),
+        normalizedTitle
+      );
+        
       const contentSimilarity = calculateSimilarity(
-        existingMemory.content.toLowerCase(), 
-        memory.content.toLowerCase()
+        normalizeText(existingMemory.content),
+        normalizedContent
       );
       
-      if (contentSimilarity > 0.7) { // 70% similarity threshold
-        console.log(`Found similar memory: "${existingMemory.title}" with ${Math.round(contentSimilarity * 100)}% content similarity`);
+      // A high similarity in both title and content is a strong indicator of a duplicate
+      if (titleSimilarity > 0.85 && contentSimilarity > 0.85) {
+        console.log(`Found duplicate memory: "${existingMemory.title}" (T:${Math.round(titleSimilarity * 100)}% C:${Math.round(contentSimilarity * 100)}%)`);
         return true;
       }
     }
@@ -236,34 +243,13 @@ async function checkForDuplicate(memory) {
 }
 
 /**
- * Calculate simple text similarity ratio
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * @returns {number} - Similarity ratio between 0 and 1
- */
-function calculateSimilarity(str1, str2) {
-  if (!str1 || !str2) return 0;
-  
-  // Use a simple approach - calculate how many words are shared
-  const words1 = new Set(str1.split(/\s+/).filter(Boolean));
-  const words2 = new Set(str2.split(/\s+/).filter(Boolean));
-  
-  // Find intersection
-  const intersection = new Set([...words1].filter(x => words2.has(x)));
-  
-  // Calculate Jaccard similarity
-  const union = new Set([...words1, ...words2]);
-  
-  return intersection.size / union.size;
-}
-
-/**
  * Process memories from LLM extraction
  * @param {Array} memories - Memories extracted by LLM
  * @param {string} sessionId - Session ID for linking transcriptions
+ * @param {number|null} transcriptionId - The ID of the source transcription
  * @returns {Promise<Array>} - Created memories
  */
-async function processMemories(memories, sessionId) {
+async function processMemories(memories, sessionId, transcriptionId = null) {
   const results = [];
   
   try {
@@ -271,21 +257,30 @@ async function processMemories(memories, sessionId) {
       console.log(`Processing ${memories.length} consolidated memories`);
       
       for (const item of memories) {
+        const normalizedTitle = normalizeText(item.title);
+        const normalizedContent = normalizeText(item.content);
+
         // Skip empty memories or memories with insufficient content
-        if (!item.title || !item.content || item.title.trim() === '' || item.content.trim() === '') {
+        if (!normalizedTitle || !normalizedContent || normalizedTitle.trim() === '' || normalizedContent.trim() === '') {
           console.log('Skipping empty memory item');
           continue;
         }
         
-        // Skip memories with placeholder or generic titles
-        if (/^(unknown|placeholder|generic|text information|stored information)$/i.test(item.title.trim())) {
+        // Skip memories with placeholder or generic titles. 
+        // This list can be expanded.
+        const genericTitlePatterns = [
+          /^untitled$/, /^no title$/, /^general info$/, /^note$/, 
+          /^(unknown|placeholder|generic|text information|stored information|summary)$/i
+        ];
+
+        if (genericTitlePatterns.some(pattern => pattern.test(normalizedTitle))) {
           console.log(`Skipping generic memory with title: "${item.title}"`);
           continue;
         }
         
         // Validate memory content length - ensure it's substantial
-        const contentWords = item.content.split(/\s+/).length;
-        const minimumWords = item.importance >= 3 ? 200 : 100;
+        const contentWords = normalizedContent.split(/\s+/).length;
+        const minimumWords = item.importance >= 4 ? 50 : 25;
         
         if (contentWords < minimumWords) {
           console.log(`Skipping memory with insufficient content: ${contentWords} words (minimum: ${minimumWords})`);
@@ -296,23 +291,11 @@ async function processMemories(memories, sessionId) {
         
         // Calculate expiration date if provided
         let expiresAt = null;
-        if (item.expiration && item.expiration !== 'permanent') {
-          try {
-            // Handle both numeric days and date strings
-            if (!isNaN(parseInt(item.expiration))) {
-              const days = parseInt(item.expiration);
-              const date = new Date();
-              date.setDate(date.getDate() + days);
-              expiresAt = date.toISOString();
-              console.log(`Setting expiration to ${days} days from now: ${expiresAt}`);
-            } else {
-              // Try to parse as a date string
-              expiresAt = new Date(item.expiration).toISOString();
-              console.log(`Setting expiration from date string: ${expiresAt}`);
-            }
-          } catch (e) {
-            console.warn('Invalid expiration format:', item.expiration);
-          }
+        if (item.expiration && /^\d+d$/.test(item.expiration)) {
+          const days = parseInt(item.expiration.replace('d', ''));
+          expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + days);
+          expiresAt = expiresAt.toISOString();
         }
         
         try {
@@ -320,8 +303,8 @@ async function processMemories(memories, sessionId) {
           
           // Handle new memory fields
           const memoryData = {
-            title: item.title,
-            content: item.content,
+            title: normalizedTitle,
+            content: normalizedContent,
             context: item.context || null,
             participants: item.participants || null,
             key_points: item.keyPoints || item.key_points || null, // Support both formats
@@ -338,24 +321,10 @@ async function processMemories(memories, sessionId) {
           
           const memory = await createMemory(memoryData);
           
-          // If sessionId is provided, find the latest transcription and link it to this memory
-          if (sessionId) {
-            try {
-              // Get all transcriptions for this session
-              const transcriptions = await transcriptionService.getTranscriptions({ 
-                session_id: sessionId,
-                sortBy: 'created_at',
-                sortOrder: 'DESC'
-              });
-              
-              // Link the most recent transcription to this memory
-              if (transcriptions && transcriptions.length > 0) {
-                await transcriptionService.linkTranscriptionToMemory(transcriptions[0].id, memory.id);
-                console.log(`Linked transcription ${transcriptions[0].id} to memory ${memory.id}`);
-              }
-            } catch (err) {
-              console.error('Error linking transcription to memory:', err);
-            }
+          // If a specific transcriptionId is provided, link it directly.
+          if (transcriptionId) {
+            await transcriptionService.linkTranscriptionToMemory(transcriptionId, memory.id);
+            console.log(`Linked transcription ${transcriptionId} to memory ${memory.id}`);
           }
           
           results.push(memory);
@@ -400,5 +369,4 @@ module.exports = {
   processMemories,
   searchMemories,
   checkForDuplicate,
-  calculateSimilarity
 }; 

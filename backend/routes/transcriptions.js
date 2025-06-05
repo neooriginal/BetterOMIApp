@@ -4,6 +4,7 @@ const transcriptionService = require('../services/transcriptionService');
 const llmService = require('../services/llmService');
 const brainService = require('../services/brainService');
 const actionItemsService = require('../services/actionItemsService');
+const memoriesService = require('../services/memoriesService');
 
 /**
  * Get all transcriptions with optional filtering
@@ -142,74 +143,46 @@ router.get('/search', async (req, res) => {
 });
 
 /**
- * Process text into separate brain, memory, and action items
+ * Process a text input for memory and action item extraction
  */
 router.post('/process', async (req, res) => {
   try {
     const { text, session_id } = req.body;
     
-    if (!text) {
+    if (!text || !session_id) {
       return res.status(400).json({
         success: false,
-        message: 'Text is required'
+        message: 'Text and session_id are required'
       });
     }
     
-    console.log('Processing text input with separate AI requests...');
-    
-    // Create a transcription for the input
+    // Create a transcription record first
     const transcription = await transcriptionService.createTranscription(text, session_id);
     
-    // Process with separate API requests
-    const [brainEntities, memories, actionItems] = await Promise.all([
-      // Brain entities request
-      llmService.analyzeBrainEntities(text).then(async (result) => {
-        console.log(`Brain analysis complete: ${result.people.length} people, ${result.locations.length} locations, ${result.events.length} events`);
-        try {
-          // Process entities into brain nodes
-          const processedEntities = await brainService.processEntities(result);
-          return processedEntities;
-        } catch (error) {
-          console.error('Error processing brain entities:', error);
-          return null;
-        }
-      }),
-      
-      // Memories request
-      llmService.extractMemories(text).then(async (memories) => {
-        console.log(`Memory extraction complete: ${memories.length} memories`);
-        // Just return the memories, they will be saved elsewhere
-        return memories;
-      }),
-      
-      // Action items request
-      llmService.extractActionItems(text).then(async (items) => {
-        console.log(`Action item extraction complete: ${items.length} action items`);
-        // Create action items in the database
-        const savedItems = [];
-        for (const item of items) {
-          try {
-            const savedItem = await actionItemsService.createActionItem({
-              title: item.title,
-              description: item.description,
-              due_date: item.dueDate,
-              priority: item.priority
-            });
-            savedItems.push(savedItem);
-          } catch (error) {
-            console.error('Error saving action item:', error);
-          }
-        }
-        return savedItems;
-      })
+    // Asynchronously extract memories, action items, and brain entities
+    const [memories, actionItems, brainEntitiesResult] = await Promise.all([
+      llmService.extractMemories(transcription.text),
+      llmService.extractActionItems(transcription.text),
+      llmService.analyzeBrainEntities(transcription.text)
     ]);
+    
+    console.log(`Extracted ${memories.length} memories, ${actionItems.length} action items, and analyzed brain entities.`);
+    
+    // Process and save the extracted content
+    const [savedMemories, savedActionItems, savedBrainEntities] = await Promise.all([
+      memoriesService.processMemories(memories, session_id, transcription.id),
+      actionItemsService.processActionItems(actionItems),
+      brainService.processEntities(brainEntitiesResult)
+    ]);
+
+    console.log(`Saved ${savedMemories.length} memories, ${savedActionItems.length} action items, and ${savedBrainEntities.length} brain entities.`);
     
     res.json({
       success: true,
       transcription,
-      brain: brainEntities,
-      memories,
-      actionItems
+      memories: savedMemories,
+      actionItems: savedActionItems,
+      brain: savedBrainEntities
     });
   } catch (error) {
     console.error('Error processing text input:', error);
