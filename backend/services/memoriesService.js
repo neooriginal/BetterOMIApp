@@ -192,6 +192,72 @@ async function deleteMemory(id) {
 }
 
 /**
+ * Check if a similar memory already exists to prevent duplicates
+ * @param {Object} memory - Memory details to check
+ * @returns {Promise<boolean>} - Whether a similar memory exists
+ */
+async function checkForDuplicate(memory) {
+  try {
+    // Check for exact title match or similar content
+    const similarMemories = await all(
+      'SELECT * FROM memories WHERE title = ? OR content LIKE ? ORDER BY created_at DESC LIMIT 5',
+      [memory.title, `%${memory.content.substring(0, 50)}%`]
+    );
+    
+    if (!similarMemories || similarMemories.length === 0) {
+      return false; // No similar memories found
+    }
+    
+    // Check for high similarity with existing memories
+    for (const existingMemory of similarMemories) {
+      // If exact title match
+      if (existingMemory.title === memory.title) {
+        console.log(`Found duplicate memory with title: ${memory.title}`);
+        return true;
+      }
+      
+      // If very similar content (using a simple but effective similarity check)
+      const contentSimilarity = calculateSimilarity(
+        existingMemory.content.toLowerCase(), 
+        memory.content.toLowerCase()
+      );
+      
+      if (contentSimilarity > 0.7) { // 70% similarity threshold
+        console.log(`Found similar memory: "${existingMemory.title}" with ${Math.round(contentSimilarity * 100)}% content similarity`);
+        return true;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking for duplicate memory:', error);
+    return false; // Proceed with creation in case of error
+  }
+}
+
+/**
+ * Calculate simple text similarity ratio
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @returns {number} - Similarity ratio between 0 and 1
+ */
+function calculateSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+  
+  // Use a simple approach - calculate how many words are shared
+  const words1 = new Set(str1.split(/\s+/).filter(Boolean));
+  const words2 = new Set(str2.split(/\s+/).filter(Boolean));
+  
+  // Find intersection
+  const intersection = new Set([...words1].filter(x => words2.has(x)));
+  
+  // Calculate Jaccard similarity
+  const union = new Set([...words1, ...words2]);
+  
+  return intersection.size / union.size;
+}
+
+/**
  * Process memories from LLM extraction
  * @param {Array} memories - Memories extracted by LLM
  * @param {string} sessionId - Session ID for linking transcriptions
@@ -263,6 +329,13 @@ async function processMemories(memories, sessionId) {
             expires_at: expiresAt
           };
           
+          // Check for duplicate memories before creating
+          const isDuplicate = await checkForDuplicate(memoryData);
+          if (isDuplicate) {
+            console.log(`Skipping duplicate memory: "${item.title}"`);
+            continue;
+          }
+          
           const memory = await createMemory(memoryData);
           
           // If sessionId is provided, find the latest transcription and link it to this memory
@@ -325,5 +398,7 @@ module.exports = {
   updateMemory,
   deleteMemory,
   processMemories,
-  searchMemories
+  searchMemories,
+  checkForDuplicate,
+  calculateSimilarity
 }; 
