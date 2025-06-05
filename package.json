@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
+    "chrono-node": "^2.8.2",
     "wav": "^1.0.2"
   }
 }

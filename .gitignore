@@ -14,3 +14,4 @@ python/omi/__pycache__/decoder.cpython-311.pyc
 python/omi/__pycache__/bluetooth.cpython-311.pyc
 python/omi/__pycache__/__init__.cpython-311.pyc
 /node_modules
+package-lock.json
