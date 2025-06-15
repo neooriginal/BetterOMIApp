@@ -1,5 +1,7 @@
 # Better OMI App
 
+## Project is abandoned as the official app improved and this is not needed anymore.
+
 This repository contains the mobile client and backend for the BetterOMI project.
 
 - **app/** – React Native application built with Expo.
